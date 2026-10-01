@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { readlinkSync } from 'node:fs';
 import { basename } from 'node:path';
 import { isPidAlive } from './fs-utils.js';
 
@@ -46,9 +47,20 @@ export function readProcess(pid) {
   try {
     // One field per call: with several, ps prints a header unless every field has "=".
     const ppid = Number(ps(pid, 'ppid'));
-    const comm = ps(pid, 'comm');
+    const comm = linuxExe(pid) || ps(pid, 'comm');
     if (!Number.isInteger(ppid) || !comm) return null;
     return { ppid, comm, args: ps(pid, 'args') };
+  } catch {
+    return null;
+  }
+}
+
+// On Linux, ps's comm is the main thread's name, and Node 24 renames its main
+// thread to "MainThread". The executable is the reliable name there.
+function linuxExe(pid) {
+  if (process.platform !== 'linux') return null;
+  try {
+    return basename(readlinkSync(`/proc/${pid}/exe`).replace(/ \(deleted\)$/, ''));
   } catch {
     return null;
   }
