@@ -1,0 +1,9 @@
+{
+  "name": "pluginslab-devtools-fleet",
+  "version": "1.0.0",
+  "description": "devtools-fleet: chrome-devtools-mcp for ten agents at once",
+  "owner": { "name": "PluginsLab" },
+  "plugins": [
+    { "name": "devtools-fleet", "source": "./", "description": "One isolated Chrome per agent, running Google's chrome-devtools-mcp tools, with saved login states and origin allowlists" }
+  ]
+}

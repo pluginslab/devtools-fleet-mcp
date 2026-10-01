@@ -1,0 +1,21 @@
+{
+  "name": "devtools-fleet",
+  "version": "0.1.0",
+  "description": "One isolated Chrome per agent, running Google's chrome-devtools-mcp tools, with saved login states and origin allowlists",
+  "author": {
+    "name": "Marcel Schmitz",
+    "url": "https://github.com/pluginslab"
+  },
+  "homepage": "https://github.com/pluginslab/devtools-fleet-mcp",
+  "repository": "https://github.com/pluginslab/devtools-fleet-mcp",
+  "license": "MIT",
+  "mcpServers": {
+    "devtools-fleet": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "devtools-fleet-mcp"
+      ]
+    }
+  }
+}

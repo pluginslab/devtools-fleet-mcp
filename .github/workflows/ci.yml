@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        node: [22, 24]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      # Ubuntu 24.04 restricts unprivileged user namespaces, which Chrome's sandbox needs.
+      - if: runner.os == 'Linux'
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      - run: npx devtools-fleet doctor
+      - run: npm run test:integration
+      # Upstream flags we rely on must still exist.
+      - run: node node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js --help | grep -q -- '--browserUrl'

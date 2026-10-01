@@ -1,0 +1,61 @@
+{
+  "name": "devtools-fleet-mcp",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "chrome-devtools-mcp for ten agents at once: one isolated Chrome per agent, saved login states, origin allowlists, and a CLI to see and reap them all",
+  "main": "src/index.js",
+  "bin": {
+    "devtools-fleet-mcp": "src/index.js",
+    "devtools-fleet": "bin/cli.js"
+  },
+  "files": [
+    "src/",
+    "bin/",
+    "skills/",
+    ".claude-plugin/",
+    "LICENSE",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test --test-concurrency=1 test/unit/*.test.js",
+    "test:integration": "node --test --test-concurrency=1 --test-timeout=900000 test/integration/*.test.js",
+    "test:all": "npm test && npm run test:integration",
+    "lint": "eslint src/ bin/"
+  },
+  "keywords": [
+    "chrome",
+    "devtools",
+    "chrome-devtools-mcp",
+    "mcp",
+    "model-context-protocol",
+    "browser",
+    "multi-agent",
+    "claude-code"
+  ],
+  "author": "Marcel Schmitz",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pluginslab/devtools-fleet-mcp.git"
+  },
+  "homepage": "https://github.com/pluginslab/devtools-fleet-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/pluginslab/devtools-fleet-mcp/issues"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.31.0",
+    "@puppeteer/browsers": "^3.2.3",
+    "chrome-devtools-mcp": "^1.10.1",
+    "commander": "^15.0.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.11.0"
+  }
+}
