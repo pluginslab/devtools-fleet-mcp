@@ -1,5 +1,6 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { join } from 'node:path';
 import { makeHome, cleanupHome, registry, FleetClient, runCli, startFixtures, waitFor, pageId, evalValue, sleep } from '../helpers/fleet.js';
 
 // Acceptance tests 1-4 from SCOPE.md: isolation, the cap, re-adoption, reaping.
@@ -96,7 +97,10 @@ test('4. the reaper closes orphans at once and detached browsers after the timeo
 
   const r = await runCli(home, ['gc'], { env: { DEVTOOLS_FLEET_ORPHAN_TIMEOUT_MINUTES: '1' } });
   assert.equal(r.code, 0, r.stderr);
-  assert.match(r.stdout, new RegExp(`${orphanEntry.id}\\s+owning session ended`));
+  // The background reaper closes orphans at once, so it may beat gc to this one.
+  const { readFileSync } = await import('node:fs');
+  const reaperLog = (() => { try { return readFileSync(join(home, 'reaper.log'), 'utf8'); } catch { return ''; } })();
+  assert.match(r.stdout + reaperLog, new RegExp(`${orphanEntry.id}\\s+owning session ended`));
   assert.match(r.stdout, new RegExp(`${idleEntry.id}\\s+detached for over 1 min`));
   assert.equal(registry(home).length, 0);
   const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
