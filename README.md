@@ -139,7 +139,7 @@ Starts this session's browser, or picks it up again after a reconnect. Optional:
 |---|---|---|
 | `state` | string | Saved login to start from |
 | `headless` | boolean | Default from config (`true`) |
-| `viewport` | string | e.g. `"1280x720"` |
+| `viewport` | string | e.g. `"1280x720"`. Default from config (`1366x900`) |
 | `channel` | string | `stable`, `beta`, `dev` or `canary` |
 | `url` | string | Open this in the first tab |
 | `allowedOrigins` | string[] | Without a state: restrict this browser voluntarily |
@@ -311,7 +311,7 @@ chrome-devtools-mcp only reads and writes files (screenshots, traces, uploads) i
 | Key | Env | Default | |
 |---|---|---|---|
 | `headless` | `DEVTOOLS_FLEET_HEADLESS` | `true` | |
-| `viewport` | `DEVTOOLS_FLEET_VIEWPORT` | none | e.g. `"1280x720"` |
+| `viewport` | `DEVTOOLS_FLEET_VIEWPORT` | `"1366x900"` | window size; desktop-sized so pages render their desktop layout. `null` (env: `none`) keeps Chrome's default, a 756 px wide page |
 | `channel` | `DEVTOOLS_FLEET_CHANNEL` | `stable` | |
 | `chromePath` | `DEVTOOLS_FLEET_CHROME_PATH` | detected | |
 | `maxBrowsers` | `DEVTOOLS_FLEET_MAX_BROWSERS` | `10` | across the machine |

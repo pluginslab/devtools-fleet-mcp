@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.1.1] - 2026-10-16
+
+### Changed
+
+- **Browsers now default to a 1366x900 window** (a 1366x813 page). Without one, headless Chrome gave pages 756x469, below most responsive breakpoints (wp-admin switches at 782), so agents saw mobile layouts: wp-admin's snapshot had no admin menu at all, and screenshots and Lighthouse runs came from a phone-sized page. Set `"viewport": null` in `~/.devtools-fleet/config.json` (or `DEVTOOLS_FLEET_VIEWPORT=none`) to keep Chrome's default. `browser_start({ viewport })` still overrides per browser. Login windows are unchanged.
+
 ## [0.1.0] - 2026-10-01
 
 First version, built against `SCOPE.md`.

@@ -17,7 +17,10 @@ export const PATHS = {
 
 export const DEFAULTS = {
   headless: true,
-  viewport: null,
+  // A desktop size. Chrome's own headless default (800x600) is below most
+  // responsive breakpoints, so agents saw mobile layouts (wp-admin without its
+  // admin menu). null, or DEVTOOLS_FLEET_VIEWPORT=none, keeps Chrome's default.
+  viewport: '1366x900',
   channel: 'stable',
   chromePath: null,
   maxBrowsers: 10,
@@ -39,7 +42,7 @@ const RESERVED_UPSTREAM_FLAGS = [
 
 const ENV = {
   headless: ['DEVTOOLS_FLEET_HEADLESS', parseBool],
-  viewport: ['DEVTOOLS_FLEET_VIEWPORT', String],
+  viewport: ['DEVTOOLS_FLEET_VIEWPORT', (v) => (v === 'none' ? null : v)],
   channel: ['DEVTOOLS_FLEET_CHANNEL', String],
   chromePath: ['DEVTOOLS_FLEET_CHROME_PATH', String],
   maxBrowsers: ['DEVTOOLS_FLEET_MAX_BROWSERS', parsePositiveInt],
