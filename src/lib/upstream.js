@@ -28,13 +28,15 @@ export class Upstream {
    *   Upstream only reads and writes files inside roots (plus the temp dir), so
    *   they're passed through; without them, screenshots can't go to the project.
    */
-  static async start({ browserUrl, extraArgs = [], rootsProvider = null }) {
+  static async start({ browserUrl, wsEndpoint = null, extraArgs = [], rootsProvider = null }) {
     const upstream = new Upstream();
     // A port nothing listens on is fine for listing: upstream connects lazily.
     const url = browserUrl ?? 'http://127.0.0.1:9';
+    // A Smart Terminal browser has a WebSocket endpoint only (see smart-terminal.js).
+    const target = wsEndpoint ? `--wsEndpoint=${wsEndpoint}` : `--browserUrl=${url}`;
     const transport = new StdioClientTransport({
       command: process.execPath,
-      args: [UPSTREAM_BIN, `--browserUrl=${url}`, ...extraArgs],
+      args: [UPSTREAM_BIN, target, ...extraArgs],
       stderr: 'pipe',
     });
     transport.stderr?.on('data', (chunk) => {

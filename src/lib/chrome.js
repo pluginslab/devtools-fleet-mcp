@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs';
 import { Browser, computeSystemExecutablePath, detectBrowserPlatform } from '@puppeteer/browsers';
 import { parseViewport } from './config.js';
 import { ensurePrivateDir, isPidAlive, sleep } from './fs-utils.js';
+import { isSmartTerminalBrowserAlive, closeSmartTerminalBrowser } from './smart-terminal.js';
 
 // Flags close to what puppeteer/chrome-devtools-mcp use: quiet, no first-run
 // UI, no background noise that would show up in the agent's network panel.
@@ -136,7 +137,8 @@ export function browserWsUrl({ port, wsPath }) {
 }
 
 /** Page targets as the debugging server lists them (no CDP connection needed). */
-export async function listPages({ port }, timeoutMs = 2000) {
+export async function listPages({ port, smartTerminal }, timeoutMs = 2000) {
+  if (smartTerminal) return []; // the gate lists none: the pane shows them
   const res = await fetch(`http://127.0.0.1:${port}/json/list`, { signal: AbortSignal.timeout(timeoutMs) });
   const targets = await res.json();
   return targets.filter((t) => t.type === 'page').map((t) => ({ id: t.id, url: t.url, title: t.title }));
@@ -151,7 +153,9 @@ export function inspectorUrl({ port }, targetId) {
 }
 
 /** True when a Chrome answers on the port with the expected browser endpoint. */
-export async function isChromeAlive({ port, wsPath, chromePid }, timeoutMs = 2000) {
+export async function isChromeAlive(entry, timeoutMs = 2000) {
+  if (entry.smartTerminal) return isSmartTerminalBrowserAlive(entry);
+  const { port, wsPath, chromePid } = entry;
   if (!port || (chromePid && !isPidAlive(chromePid))) return false;
   try {
     const res = await fetch(`http://127.0.0.1:${port}/json/version`, { signal: AbortSignal.timeout(timeoutMs) });
@@ -179,7 +183,9 @@ export function pidOwnsProfile(pid, profileDir) {
  * Close a fleet browser: politely over CDP, then by signal. Only signals a pid
  * that is still a Chrome on this profile, so a recycled pid is never hit.
  */
-export async function closeChrome({ port, wsPath, chromePid, profileDir }, { cdp = null, timeoutMs = 5000 } = {}) {
+export async function closeChrome(entry, { cdp = null, timeoutMs = 5000 } = {}) {
+  if (entry.smartTerminal) return closeSmartTerminalBrowser(entry);
+  const { port, wsPath, chromePid, profileDir } = entry;
   const ours = pidOwnsProfile(chromePid, profileDir);
   if (ours && await isChromeAlive({ port, wsPath, chromePid })) {
     try {

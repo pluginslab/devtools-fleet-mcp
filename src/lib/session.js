@@ -14,6 +14,7 @@ import { applyStorage, captureStorage, openOrigins, openTabUrls } from './storag
 import { readState, writeState, stateExists, summarizeState } from './states.js';
 import { Upstream } from './upstream.js';
 import { anchorMatches } from './process-tree.js';
+import { smartTerminalGate, openSmartTerminalBrowser } from './smart-terminal.js';
 
 const HEARTBEAT_MS = 30_000;
 
@@ -197,9 +198,21 @@ export class FleetSession {
   }
 
   async #launch(plan) {
-    const chrome = await this.#launchChrome(plan.headless);
-    this.#patch({ chromePid: chrome.pid, port: chrome.port, wsPath: chrome.wsPath });
-    this.#cdp = await CdpConnection.connect(browserWsUrl(chrome));
+    // In a Smart Terminal tab the browser is the tab's pane. Strict states need
+    // Chrome's own network lockdown, set at launch: those still get a Chrome.
+    const gate = plan.strict ? null : smartTerminalGate();
+    if (gate) {
+      const st = await openSmartTerminalBrowser(gate, this.#entry.id);
+      rmSync(this.#entry.profileDir, { recursive: true, force: true });
+      this.#patch({
+        chromePid: gate.pid, port: st.port, wsPath: st.wsPath, profileDir: null, headless: false,
+        smartTerminal: { url: gate.url, token: gate.token, pid: gate.pid, tab: st.tab },
+      });
+    } else {
+      const chrome = await this.#launchChrome(plan.headless);
+      this.#patch({ chromePid: chrome.pid, port: chrome.port, wsPath: chrome.wsPath });
+    }
+    this.#cdp = await CdpConnection.connect(browserWsUrl(this.#entry));
     // Logins go in before the guard (the restore tab is fleet's own) and before any real page loads.
     if (plan.stateData) await applyStorage(this.#cdp, plan.stateData);
     await this.#installGuard();
@@ -227,6 +240,7 @@ export class FleetSession {
   async #startUpstream() {
     this.#upstream = await Upstream.start({
       browserUrl: `http://127.0.0.1:${this.#entry.port}`,
+      wsEndpoint: this.#entry.smartTerminal ? browserWsUrl(this.#entry) : null,
       extraArgs: this.#config.upstreamArgs,
       rootsProvider: this.#rootsProvider,
     });
@@ -329,6 +343,7 @@ export class FleetSession {
         headless: this.#entry.headless,
         viewport: this.#entry.viewport,
         channel: this.#entry.channel,
+        smartTerminalTab: this.#entry.smartTerminal?.tab ?? null,
         tabs,
         uptimeSeconds: Math.round((Date.now() - this.#entry.createdAt) / 1000),
         blockedRequests: this.#blocks.length,
@@ -437,7 +452,7 @@ export class FleetSession {
     if (entry && !keepBrowser) {
       await closeChrome(entry, { cdp: this.#cdp }).catch(() => {});
       removeEntry(entry.id);
-      rmSync(entry.profileDir, { recursive: true, force: true });
+      if (entry.profileDir) rmSync(entry.profileDir, { recursive: true, force: true });
     } else if (entry) {
       try {
         updateEntry(entry.id, { fleetPid: 0, lastSeen: Date.now() });
