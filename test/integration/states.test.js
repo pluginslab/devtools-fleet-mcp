@@ -2,7 +2,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { makeHome, cleanupHome, registry, FleetClient, runCli, spawnCli, startFixtures, waitFor, pageId, evalValue, sleep } from '../helpers/fleet.js';
+import { makeHome, cleanupHome, registry, FleetClient, runCli, spawnCli, startFixtures, waitFor, pageId, evalValue, sleep, assertBackend } from '../helpers/fleet.js';
 import { CdpConnection } from '../../src/lib/cdp.js';
 
 // Acceptance tests 5-8 from SCOPE.md: login → state → logged-in agents,
@@ -56,6 +56,7 @@ test('5b. an agent started from the state is logged in, and the site was not con
   const hitsBefore = { ...fx.app.hits };
   const c = await FleetClient.start({ home });
   const started = await c.call('browser_start', { state: 'fixture-admin', url: `${fx.appOrigin}/app` });
+  registry(home).filter((e) => e.kind === 'agent').forEach((e) => assertBackend(e, { strict: e.strict }));
   assert.equal(started.isError, false, started.text);
   assert.match(started.text, /state "fixture-admin"/);
   await sleep(500);
@@ -72,6 +73,7 @@ test('5c. several agents use the same state at once', async () => {
   const clients = await Promise.all([1, 2, 3].map(() => FleetClient.start({ home })));
   try {
     await Promise.all(clients.map((c) => c.call('browser_start', { state: 'fixture-admin', url: `${fx.appOrigin}/app` })));
+    registry(home).filter((e) => e.kind === 'agent').forEach((e) => assertBackend(e, { strict: e.strict }));
     await sleep(500);
     for (const c of clients) {
       const pages = await c.call('list_pages');
@@ -87,6 +89,7 @@ test('5c. several agents use the same state at once', async () => {
 test('6. the allowlist blocks typed URLs, clicks and popups; strict also blocks fetch()', async () => {
   const c = await FleetClient.start({ home });
   await c.call('browser_start', { state: 'fixture-admin', url: `${fx.appOrigin}/app` });
+  registry(home).filter((e) => e.kind === 'agent').forEach((e) => assertBackend(e, { strict: e.strict }));
   await sleep(500);
 
   const typed = await c.call('new_page', { url: `${fx.outsideOrigin}/typed` });
@@ -114,6 +117,7 @@ test('6. the allowlist blocks typed URLs, clicks and popups; strict also blocks 
   const imported = await runCli(home, ['state', 'import', 'fixture-strict', join(home, 'states', 'fixture-admin.json'), '--allow', fx.appOrigin, '--strict']);
   assert.equal(imported.code, 0, imported.stderr);
   await c.call('browser_start', { state: 'fixture-strict', url: `${fx.appOrigin}/beacon` });
+  registry(home).filter((e) => e.kind === 'agent').forEach((e) => assertBackend(e, { strict: e.strict }));
   await sleep(1000);
   pages = await c.call('list_pages');
   const title = evalValue((await c.call('evaluate_script', { pageId: pageId(pages.text, '/beacon'), function: '() => document.title' })).text);
@@ -127,6 +131,7 @@ test('strict: WebSockets and a detached browser are locked down by Chrome itself
   const env = { DEVTOOLS_FLEET_SESSION: 'strict-lock' };
   const c = await FleetClient.start({ home, env });
   const started = await c.call('browser_start', { state: 'fixture-strict', url: `${fx.appOrigin}/app` });
+  registry(home).filter((e) => e.kind === 'agent').forEach((e) => assertBackend(e, { strict: e.strict }));
   assert.equal(started.isError, false, started.text);
   await sleep(700);
   const pages = await c.call('list_pages');
@@ -163,6 +168,7 @@ test('7. no listing ever shows cookie values', async () => {
 test('agents may narrow but never widen an allowlist, and never overwrite a person\'s state', async () => {
   const c = await FleetClient.start({ home });
   await c.call('browser_start', { state: 'fixture-admin', url: `${fx.appOrigin}/app` });
+  registry(home).filter((e) => e.kind === 'agent').forEach((e) => assertBackend(e, { strict: e.strict }));
   await sleep(500);
 
   const widen = await c.call('state_save', { name: 'wider', allowedOrigins: [fx.appOrigin, fx.outsideOrigin] });
@@ -194,6 +200,7 @@ test('agents may narrow but never widen an allowlist, and never overwrite a pers
 test('an agent can restrict itself without a state', async () => {
   const c = await FleetClient.start({ home });
   const r = await c.call('browser_start', { allowedOrigins: [fx.appOrigin] });
+  registry(home).filter((e) => e.kind === 'agent').forEach((e) => assertBackend(e, { strict: e.strict }));
   assert.match(r.text, new RegExp(`allowed origins: ${fx.appOrigin}`));
   const blocked = await c.call('new_page', { url: `${fx.outsideOrigin}/self` });
   assert.equal(blocked.isError, true);
@@ -204,12 +211,22 @@ test('an agent can restrict itself without a state', async () => {
 test('no second browser context in a browser with an allowlist', async () => {
   const c = await FleetClient.start({ home });
   await c.call('browser_start', { state: 'fixture-admin', url: `${fx.appOrigin}/app` });
+  registry(home).filter((e) => e.kind === 'agent').forEach((e) => assertBackend(e, { strict: e.strict }));
   const viaTool = await c.call('new_page', { url: `${fx.appOrigin}/app`, isolatedContext: 'x' });
   assert.equal(viaTool.isError, true);
   assert.match(viaTool.text, /isolatedContext is not available/);
 
   // Second layer: a context created behind fleet's back is closed on sight.
   const [entry] = registry(home);
+  if (entry.smartTerminal) {
+    // A pane's endpoint is Smart Terminal's gate, which never makes a second context at all.
+    const gated = await CdpConnection.connect(`ws://127.0.0.1:${entry.port}${entry.wsPath}`);
+    await assert.rejects(gated.send('Target.createBrowserContext'), /isn't available through Smart Terminal's browser gate/);
+    gated.close();
+    await c.call('browser_stop');
+    await c.close();
+    return;
+  }
   const version = await (await fetch(`http://127.0.0.1:${entry.port}/json/version`)).json();
   const cdp = await CdpConnection.connect(version.webSocketDebuggerUrl);
   const { browserContextId } = await cdp.send('Target.createBrowserContext');

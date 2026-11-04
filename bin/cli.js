@@ -70,7 +70,7 @@ program
     const claimed = await withLock('registry', async () => targets.map((t) => readEntry(t.id)).filter(Boolean).map((e) => { removeEntry(e.id); return e; }));
     for (const e of claimed) {
       await closeEntryBrowser(e);
-      console.log(`closed ${e.id}${e.chromePid ? '' : ' (it had no Chrome yet)'}`);
+      console.log(`closed ${e.id}${e.chromePid || e.smartTerminal ? '' : ' (it had no Chrome yet)'}`);
     }
   });
 

@@ -197,21 +197,27 @@ export class FleetSession {
     });
   }
 
-  async #launch(plan) {
-    // In a Smart Terminal tab the browser is the tab's pane. Strict states need
-    // Chrome's own network lockdown, set at launch: those still get a Chrome.
-    const gate = plan.strict ? null : smartTerminalGate();
+  /**
+   * A new browser for this session's entry; returns the registry fields it sets.
+   * In a Smart Terminal tab it's the tab's pane. Strict states need Chrome's own
+   * network lockdown, set at launch: those still get a Chrome.
+   */
+  async #openBrowser(headless) {
+    const gate = this.#entry.strict ? null : smartTerminalGate();
     if (gate) {
       const st = await openSmartTerminalBrowser(gate, this.#entry.id);
-      rmSync(this.#entry.profileDir, { recursive: true, force: true });
-      this.#patch({
-        chromePid: gate.pid, port: st.port, wsPath: st.wsPath, profileDir: null, headless: false,
+      if (this.#entry.profileDir) rmSync(this.#entry.profileDir, { recursive: true, force: true });
+      return {
+        chromePid: null, port: st.port, wsPath: st.wsPath, profileDir: null, headless: false,
         smartTerminal: { url: gate.url, token: gate.token, pid: gate.pid, tab: st.tab },
-      });
-    } else {
-      const chrome = await this.#launchChrome(plan.headless);
-      this.#patch({ chromePid: chrome.pid, port: chrome.port, wsPath: chrome.wsPath });
+      };
     }
+    const chrome = await this.#launchChrome(headless);
+    return { chromePid: chrome.pid, port: chrome.port, wsPath: chrome.wsPath, headless, smartTerminal: null };
+  }
+
+  async #launch(plan) {
+    this.#patch(await this.#openBrowser(plan.headless));
     this.#cdp = await CdpConnection.connect(browserWsUrl(this.#entry));
     // Logins go in before the guard (the restore tab is fleet's own) and before any real page loads.
     if (plan.stateData) await applyStorage(this.#cdp, plan.stateData);
@@ -372,12 +378,12 @@ export class FleetSession {
     await closeChrome(previous, { cdp: this.#cdp });
     this.#cdp.close();
 
-    const nextHeadless = headless ?? this.#entry.headless;
-    const chrome = await this.#launchChrome(nextHeadless);
-    this.#cdp = await CdpConnection.connect(browserWsUrl(chrome));
+    const opened = await this.#openBrowser(headless ?? this.#entry.headless);
+    this.#cdp = await CdpConnection.connect(browserWsUrl(opened));
     await applyStorage(this.#cdp, snapshot);
     await this.#installGuard();
-    this.#patch({ chromePid: chrome.pid, port: chrome.port, wsPath: chrome.wsPath, headless: nextHeadless, lastSeen: Date.now() });
+    this.#patch({ ...opened, lastSeen: Date.now() });
+    const nextHeadless = opened.headless;
     const reopen = tabs.filter((u) => checkUrl(allowlist, u).allowed);
     if (reopen.length) {
       const { targetInfos } = await this.#cdp.send('Target.getTargets');

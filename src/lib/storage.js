@@ -67,9 +67,10 @@ async function withBlankOrigin(cdp, origin, fn) {
       fulfillPlaceholder(cdp, params.requestId, sid);
     });
     try {
+      // Together: a failed navigate must not leave the load wait to reject unhandled
+      // (that ended the whole server).
       const loaded = cdp.waitFor('Page.loadEventFired', (_, sid) => sid === sessionId, 10_000);
-      await cdp.send('Page.navigate', { url: `${origin}${PLACEHOLDER_PATH}` }, sessionId);
-      await loaded;
+      await Promise.all([loaded, cdp.send('Page.navigate', { url: `${origin}${PLACEHOLDER_PATH}` }, sessionId)]);
     } finally {
       off();
     }

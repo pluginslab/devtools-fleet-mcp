@@ -1,7 +1,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
-import { makeHome, cleanupHome, registry, FleetClient, runCli, startFixtures, waitFor, pageId, evalValue, sleep } from '../helpers/fleet.js';
+import { makeHome, cleanupHome, registry, FleetClient, runCli, startFixtures, waitFor, pageId, evalValue, sleep, assertBackend, crashBrowser, browserGone, gateBrowsers, VIA_SMART_TERMINAL } from '../helpers/fleet.js';
 
 // Acceptance tests 1-4 from SCOPE.md: isolation, the cap, re-adoption, reaping.
 // Plus crash recovery and relaunch.
@@ -22,6 +22,7 @@ test('1+2. ten sessions in parallel each get their own browser; the eleventh hit
   const clients = await Promise.all(Array.from({ length: 10 }, () => FleetClient.start({ home })));
   try {
     const opened = await Promise.all(clients.map((c, i) => c.call('new_page', { url: `${fx.appOrigin}/page-${i}` })));
+    registry(home).forEach((e) => assertBackend(e));
     opened.forEach((r, i) => assert.ok(!r.isError && r.text.includes(`/page-${i}`), `client ${i}: ${r.text}`));
 
     const lists = await Promise.all(clients.map((c) => c.call('list_pages')));
@@ -103,16 +104,16 @@ test('4. the reaper closes orphans at once and detached browsers after the timeo
   assert.match(r.stdout + reaperLog, new RegExp(`${orphanEntry.id}\\s+owning session ended`));
   assert.match(r.stdout, new RegExp(`${idleEntry.id}\\s+detached for over 1 min`));
   assert.equal(registry(home).length, 0);
-  const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
-  await waitFor(() => !alive(orphanEntry.chromePid) && !alive(idleEntry.chromePid), { what: 'chromes to exit' });
+  await waitFor(async () => (await browserGone(orphanEntry)) && (await browserGone(idleEntry)), { what: 'browsers to close' });
 });
 
 test('recovery: a crashed Chrome is replaced; a crashed chrome-devtools-mcp is restarted', async () => {
   const c = await FleetClient.start({ home });
   await c.call('new_page', { url: `${fx.appOrigin}/before-crash` });
   const [entry] = registry(home);
+  assertBackend(entry);
 
-  process.kill(entry.chromePid, 'SIGKILL');
+  await crashBrowser(entry);
   await sleep(500);
   const afterChrome = await c.call('new_page', { url: `${fx.appOrigin}/after-crash` });
   assert.equal(afterChrome.isError, false, afterChrome.text);
@@ -168,7 +169,7 @@ test('explicit options on a running browser are refused with a clear message', a
   await c.close();
 });
 
-test('a launch that hangs times out cleanly: error to the agent, nothing left running or registered', async () => {
+test('a launch that hangs times out cleanly: error to the agent, nothing left running or registered', { skip: VIA_SMART_TERMINAL && 'fakes a hanging Chrome binary; a pane launches no Chrome' }, async () => {
   const { writeFileSync, chmodSync, existsSync } = await import('node:fs');
   const { join } = await import('node:path');
   const fake = join(home, 'fake-chrome.sh');
@@ -199,10 +200,15 @@ test('parallel tool calls during browser_restart: no crash, no leaked browser', 
   assert.equal(results[0].isError, false, results[0].text);
   const entries = registry(home);
   assert.equal(entries.length, 1, 'exactly one browser registered');
-  const { execFileSync } = await import('node:child_process');
-  const mains = execFileSync('ps', ['-ax', '-o', 'args='], { encoding: 'utf8' }).split('\n')
-    .filter((l) => l.includes(`--user-data-dir=${entries[0].profileDir}`) && !l.includes('--type='));
-  assert.equal(mains.length, 1, 'exactly one Chrome on that profile');
+  assertBackend(entries[0]);
+  if (entries[0].smartTerminal) {
+    assert.equal((await gateBrowsers(entries[0])).length, 1, 'exactly one pane for that browser');
+  } else {
+    const { execFileSync } = await import('node:child_process');
+    const mains = execFileSync('ps', ['-ax', '-o', 'args='], { encoding: 'utf8' }).split('\n')
+      .filter((l) => l.includes(`--user-data-dir=${entries[0].profileDir}`) && !l.includes('--type='));
+    assert.equal(mains.length, 1, 'exactly one Chrome on that profile');
+  }
   const after = await c.call('list_pages');
   assert.match(after.text, /\/parallel/);
   await c.call('browser_stop');

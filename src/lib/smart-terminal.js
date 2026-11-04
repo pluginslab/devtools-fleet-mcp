@@ -11,6 +11,16 @@ import { isPidAlive } from './fs-utils.js';
 // SMART_TERMINAL_TAB names the tab. Every browser it hands out has its own
 // in-memory profile and a DevTools endpoint that shows that browser's pages only.
 
+/**
+ * Whether the process behind a registry entry's browser is alive. A Smart Terminal
+ * browser's is the app itself, kept apart from chromePid (null for those) so that
+ * nothing that signals a Chrome can ever reach it.
+ */
+export function browserProcessAlive(entry) {
+  if (entry.smartTerminal) return Boolean(entry.smartTerminal.pid) && isPidAlive(entry.smartTerminal.pid);
+  return Boolean(entry.chromePid) && isPidAlive(entry.chromePid);
+}
+
 /** The gate of the Smart Terminal this process runs in, or null. */
 export function smartTerminalGate(env = process.env) {
   if (env.DEVTOOLS_FLEET_SMART_TERMINAL === '0') return null;
