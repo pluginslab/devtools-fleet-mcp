@@ -304,6 +304,25 @@ chrome-devtools-mcp only reads and writes files (screenshots, traces, uploads) i
 
 `DEVTOOLS_FLEET_HOME` moves the whole directory.
 
+## In a Smart Terminal tab
+
+Run inside a [Smart Terminal](https://github.com/pluginslab/smart-terminal) tab (0.11.0
+or later), devtools-fleet doesn't launch Chrome: the agent's browser is that tab's
+browser pane, a Chromium running inside the app, beside the session it belongs to. You
+watch it work and can take over to log in or solve a captcha. Nothing else changes:
+the same tools, saved logins, allowlists, reconnects and cleanup.
+
+Smart Terminal tells its shells where to ask (`SMART_TERMINAL_GATE`, a file readable by
+you alone with a local endpoint and its token, and `SMART_TERMINAL_TAB`). Each browser
+it hands out has its own in-memory profile and a DevTools connection that shows that
+browser's pages only, never your own pages in the app or another agent's.
+
+- **Strict states still get a Chrome:** their lockdown is set at Chrome's launch.
+- **`headless` doesn't apply,** and `show` has nothing to open: the pane is the window.
+- `DEVTOOLS_FLEET_SMART_TERMINAL=0` turns it off and launches Chrome as everywhere else.
+
+Outside Smart Terminal nothing of this applies.
+
 ## Configuration
 
 `~/.devtools-fleet/config.json`, every key optional. Environment variables override the file.
@@ -329,7 +348,7 @@ chrome-devtools-mcp collects usage statistics by default and may send performanc
 - **Sites with device-bound sessions** (Device Bound Session Credentials) won't accept copied cookies.
 - **Google accounts are not supported.** Google blocks automated sign-in and binds sessions to devices.
 - **Headless can't switch to a window in place.** `browser_restart` relaunches, and the pages reload.
-- **The debugging port is local-only but not authenticated,** the same as chrome-devtools-mcp and every CDP tool: other processes running as your user can drive these browsers.
+- **The debugging port is local-only but not authenticated,** the same as chrome-devtools-mcp and every CDP tool: other processes running as your user can drive these browsers. In a Smart Terminal tab there is no port, only the app's token-protected gate.
 
 ## Companion Tools
 

@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.2.0] - 2026-11-04
+
+### Added
+
+- **Smart Terminal panes.** Run in a [Smart Terminal](https://github.com/pluginslab/smart-terminal) tab (0.11.0+), a session uses the tab's browser pane instead of launching Chrome: Smart Terminal's own Chromium, with chrome-devtools-mcp connected over `--wsEndpoint` to a DevTools gate that shows that browser's pages only. Registry, re-adoption, the reaper, saved logins and allowlists work as for Chrome; closing is a request to the app, never a signal. Strict states still launch Chrome. `DEVTOOLS_FLEET_SMART_TERMINAL=0` turns it off. See "In a Smart Terminal tab" in the README.
+- The integration suite runs against Smart Terminal when `SMART_TERMINAL_GATE` is set, and fails if a browser falls back to Chrome. Both modes pass.
+
+### Fixed
+
+- A failed navigation while restoring a saved login's localStorage left a rejected promise unhandled, which ended the whole server.
+
 ## [0.1.1] - 2026-10-16
 
 ### Changed
