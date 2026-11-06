@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.2.1] - 2026-11-06
+
+### Changed
+
+- The skill and the README explain the mobile layout: `emulate` with a phone viewport, and back. In a Smart Terminal pane (0.13.0+) the pane follows.
+
 ## [0.2.0] - 2026-11-04
 
 ### Added

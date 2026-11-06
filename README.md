@@ -317,6 +317,7 @@ you alone with a local endpoint and its token, and `SMART_TERMINAL_TAB`). Each b
 it hands out has its own in-memory profile and a DevTools connection that shows that
 browser's pages only, never your own pages in the app or another agent's.
 
+- **Desktop or mobile.** Pages get a desktop layout (1366 CSS px, zoomed to fit the pane). `emulate` with a viewport, e.g. `390x844x3,mobile,touch`, switches the pane to that phone and `emulate` without one switches back (Smart Terminal 0.13.0 or later; before, the zoom and the phone metrics compounded and clicks missed). The pane's phone/desktop button does the same for the person watching.
 - **Strict states still get a Chrome:** their lockdown is set at Chrome's launch.
 - **`headless` doesn't apply,** and `show` has nothing to open: the pane is the window.
 - `DEVTOOLS_FLEET_SMART_TERMINAL=0` turns it off and launches Chrome as everywhere else.

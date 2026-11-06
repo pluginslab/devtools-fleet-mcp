@@ -27,6 +27,10 @@ A browser started from a state only reaches that state's origins. When something
 - A tool result starting with `devtools-fleet:` means the browser or the tooling was recovered. Read it: after a browser restart, tabs are gone and page ids are new, so call `list_pages` again.
 - `devtools-fleet is at its limit of N browsers`: tell the person. Don't stop other sessions' browsers; you can't see or reach them anyway.
 
+## Mobile layout
+
+Pages render their desktop layout (1366 px wide). To see the phone version, call `emulate({ viewport: "390x844x3,mobile,touch" })`, and add `userAgent` with an iPhone Safari user agent if the site serves mobile by user agent (then reload). Call `emulate` again without `viewport` to go back to the desktop layout. In a Smart Terminal pane the pane switches with you and shows a phone icon; the person can also switch it there.
+
 ## Showing the person something
 
 - `browser_restart({ headless: false })` relaunches with a visible window (same cookies and tabs, pages reload). Use it when the person needs to watch, solve a captcha or pass 2FA. `browser_restart({ headless: true })` hides it again.
