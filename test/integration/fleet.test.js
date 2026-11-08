@@ -157,6 +157,56 @@ test('browser_restart keeps session cookies, localStorage and tabs', async () =>
   await c.close();
 });
 
+test('chrome: true gets a real Chrome in a Smart Terminal tab; browser_restart moves between Chrome and the pane, logins kept', { skip: !VIA_SMART_TERMINAL && 'needs a running Smart Terminal (SMART_TERMINAL_GATE)' }, async () => {
+  const c = await FleetClient.start({ home });
+  const started = await c.call('browser_start', { chrome: true, headless: true, url: `${fx.appOrigin}/login` });
+  assert.equal(started.isError, false, started.text);
+  let [entry] = registry(home);
+  assertBackend(entry, { strict: true }); // a Chrome, as a strict state gets
+  assert.equal(entry.chrome, true);
+  let pages = await c.call('list_pages');
+  const loginPage = pageId(pages.text, '/login');
+  await c.call('evaluate_script', { pageId: loginPage, function: '() => { document.getElementById("u").value = "admin"; document.getElementById("p").value = "pw"; document.forms[0].submit(); return true }' });
+  await sleep(800);
+  await c.call('navigate_page', { pageId: loginPage, url: `${fx.appOrigin}/app` });
+
+  const toPane = await c.call('browser_restart', { chrome: false });
+  assert.equal(toPane.isError, false, toPane.text);
+  assert.match(toPane.text, /Smart Terminal pane/);
+  [entry] = registry(home);
+  assertBackend(entry);
+  assert.equal((await gateBrowsers(entry)).length, 1);
+  pages = await c.call('list_pages');
+  let appPage = pageId(pages.text, '/app');
+  assert.equal(evalValue((await c.call('evaluate_script', { pageId: appPage, function: '() => document.title' })).text), 'user=admin ls=from-login');
+
+  const toChrome = await c.call('browser_restart', { chrome: true, headless: true });
+  assert.equal(toChrome.isError, false, toChrome.text);
+  const paneEntry = entry;
+  [entry] = registry(home);
+  assertBackend(entry, { strict: true });
+  assert.ok(entry.profileDir, 'Chrome got a profile dir again');
+  assert.equal((await gateBrowsers(paneEntry)).length, 0, 'the pane was closed');
+  pages = await c.call('list_pages');
+  appPage = pageId(pages.text, '/app');
+  assert.equal(evalValue((await c.call('evaluate_script', { pageId: appPage, function: '() => document.title' })).text), 'user=admin ls=from-login');
+
+  const again = await c.call('browser_start', { chrome: false });
+  assert.match(again.text, /browser_restart\(\{ chrome: false \}\)/);
+  await c.call('browser_stop');
+  await c.close();
+});
+
+test('browser_restart({ chrome: false }) outside Smart Terminal says there is no pane', { skip: VIA_SMART_TERMINAL && 'there is a pane' }, async () => {
+  const c = await FleetClient.start({ home });
+  await c.call('browser_start');
+  const r = await c.call('browser_restart', { chrome: false });
+  assert.equal(r.isError, true);
+  assert.match(r.text, /no pane to move to/);
+  await c.call('browser_stop');
+  await c.close();
+});
+
 test('explicit options on a running browser are refused with a clear message', async () => {
   const c = await FleetClient.start({ home });
   await c.call('browser_start');

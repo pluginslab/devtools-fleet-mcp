@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.0] - 2026-11-08
+
+### Added
+
+- **A real Chrome from inside Smart Terminal.** `browser_start({ chrome: true })` launches Chrome instead of using the tab's pane, with a window unless `headless: true`. `browser_restart({ chrome: true })` moves a running browser from the pane into Chrome, with its cookies, storage and tabs; `{ chrome: false }` moves it back. Since 0.2.0 the only way out of the pane was `DEVTOOLS_FLEET_SMART_TERMINAL=0` before the server started, so agents sent people to `devtools-fleet login` instead. For sites that refuse embedded browsers (Google sign-in) or when the person just wants Chrome.
+- Config key `smartTerminal` (default `true`); `false` makes Chrome the default in Smart Terminal tabs. `DEVTOOLS_FLEET_SMART_TERMINAL` sets it too.
+- `browser_status` says whether the browser is the pane or Chrome and how to switch. Asking `browser_start` for `chrome` while a browser runs points to `browser_restart`.
+
+### Fixed
+
+- Restarting a browser that had moved between the pane and Chrome (or restarting a pane twice) failed with "No page to read cookies through" with Smart Terminal before 0.15.0.
+
 ## [0.2.1] - 2026-11-06
 
 ### Changed

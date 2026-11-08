@@ -143,6 +143,7 @@ Starts this session's browser, or picks it up again after a reconnect. Optional:
 | `channel` | string | `stable`, `beta`, `dev` or `canary` |
 | `url` | string | Open this in the first tab |
 | `allowedOrigins` | string[] | Without a state: restrict this browser voluntarily |
+| `chrome` | boolean | In a Smart Terminal tab: a real Chrome instead of the pane, with a window unless `headless: true` |
 
 ### `browser_status`
 
@@ -158,11 +159,11 @@ This session's browser: id, state, allowlist, mode, open tabs, uptime, blocked r
 
 ### `browser_restart`
 
-Relaunches keeping cookies, storage and tabs. `{ headless: false }` gives a visible window, for example so a person can solve a captcha.
+Relaunches keeping cookies, storage and tabs. `{ headless: false }` gives a visible window, for example so a person can solve a captcha. In a Smart Terminal tab, `{ chrome: true }` moves the browser from the pane into a Chrome window and `{ chrome: false }` moves it back.
 
 ```
 → browser_restart({ headless: false })
-← Restarted with a visible window; reopened 2 tab(s). Page ids have changed: call list_pages.
+← Restarted in a Chrome window; reopened 2 tab(s). Page ids have changed: call list_pages.
 ```
 
 ### `browser_stop`
@@ -318,9 +319,9 @@ it hands out has its own in-memory profile and a DevTools connection that shows 
 browser's pages only, never your own pages in the app or another agent's.
 
 - **Desktop or mobile.** Pages get a desktop layout (1366 CSS px, zoomed to fit the pane). `emulate` with a viewport, e.g. `390x844x3,mobile,touch`, switches the pane to that phone and `emulate` without one switches back (Smart Terminal 0.13.0 or later; before, the zoom and the phone metrics compounded and clicks missed). The pane's phone/desktop button does the same for the person watching.
+- **Chrome when you want it.** Ask the agent for a real Chrome and it calls `browser_start({ chrome: true })`, or `browser_restart({ chrome: true })` to move a running browser out of the pane with its cookies and tabs (`chrome: false` moves it back). For sites that refuse embedded browsers, such as Google sign-in. `"smartTerminal": false` in the config, or `DEVTOOLS_FLEET_SMART_TERMINAL=0`, makes Chrome the default.
 - **Strict states still get a Chrome:** their lockdown is set at Chrome's launch.
 - **`headless` doesn't apply,** and `show` has nothing to open: the pane is the window.
-- `DEVTOOLS_FLEET_SMART_TERMINAL=0` turns it off and launches Chrome as everywhere else.
 
 Outside Smart Terminal nothing of this applies.
 

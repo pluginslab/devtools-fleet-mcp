@@ -34,6 +34,7 @@ Pages render their desktop layout (1366 px wide). To see the phone version, call
 ## Showing the person something
 
 - `browser_restart({ headless: false })` relaunches with a visible window (same cookies and tabs, pages reload). Use it when the person needs to watch, solve a captcha or pass 2FA. `browser_restart({ headless: true })` hides it again.
+- In a Smart Terminal tab the browser is the tab's pane. When the person asks for a real Chrome ("open it in Chrome", "not in Smart Terminal"), or a site refuses embedded browsers (Google sign-in says "this browser may not be secure"), use `browser_start({ chrome: true })`, or `browser_restart({ chrome: true })` if one is already running: a Chrome window opens with the same cookies and tabs. `browser_restart({ chrome: false })` moves it back to the pane. Don't send the person to `devtools-fleet login` for this; that's for saving a login other sessions can reuse.
 - The person can also watch without interrupting you: `devtools-fleet ls`, then `devtools-fleet show <id>`. `browser_status` tells you your id.
 
 ## Saving a login

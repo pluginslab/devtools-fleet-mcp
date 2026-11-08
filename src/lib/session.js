@@ -71,7 +71,10 @@ export class FleetSession {
     const explicit = Object.values(opts).some((v) => v !== undefined);
     if (this.#entry && !this.#cdp?.closed) {
       if (explicit) {
-        throw new Error(`This session already has a browser (${this.#entry.id}${this.#entry.state ? `, state "${this.#entry.state}"` : ''}). Call browser_stop first to start one with different options.`);
+        const move = opts.chrome !== undefined && Object.keys(opts).every((k) => ['chrome', 'headless'].includes(k) || opts[k] === undefined)
+          ? ` To move it ${opts.chrome ? 'into a real Chrome' : 'back into the Smart Terminal pane'} keeping logins and tabs, call browser_restart({ chrome: ${opts.chrome} }).`
+          : '';
+        throw new Error(`This session already has a browser (${this.#entry.id}${this.#entry.state ? `, state "${this.#entry.state}"` : ''}). Call browser_stop first to start one with different options.${move}`);
       }
       return { adopted: false, alreadyRunning: true };
     }
@@ -95,9 +98,13 @@ export class FleetSession {
     return { adopted, alreadyRunning: false };
   }
 
-  #plan({ state, headless, viewport, channel, url, allowedOrigins }) {
+  #plan({ state, headless, viewport, channel, url, allowedOrigins, chrome }) {
+    // chrome: true asks for a real Chrome even in a Smart Terminal tab. It's
+    // asked for to be seen (a login, a site that refuses embedded browsers),
+    // so it gets a window unless headless is passed too.
     const plan = {
-      headless: headless ?? this.#config.headless,
+      chrome: chrome ?? !this.#config.smartTerminal,
+      headless: headless ?? (chrome ? false : this.#config.headless),
       viewport: viewport ?? this.#config.viewport,
       channel: channel ?? this.#config.channel,
       url: url ?? null,
@@ -158,6 +165,7 @@ export class FleetSession {
       wsPath: null,
       profileDir: join(PATHS.profiles, id),
       headless: plan.headless,
+      chrome: plan.chrome,
       viewport: plan.viewport,
       channel: plan.channel,
       fleetPid: process.pid,
@@ -203,7 +211,7 @@ export class FleetSession {
    * network lockdown, set at launch: those still get a Chrome.
    */
   async #openBrowser(headless) {
-    const gate = this.#entry.strict ? null : smartTerminalGate();
+    const gate = this.#entry.strict || this.#entry.chrome ? null : smartTerminalGate();
     if (gate) {
       const st = await openSmartTerminalBrowser(gate, this.#entry.id);
       if (this.#entry.profileDir) rmSync(this.#entry.profileDir, { recursive: true, force: true });
@@ -212,8 +220,10 @@ export class FleetSession {
         smartTerminal: { url: gate.url, token: gate.token, pid: gate.pid, tab: st.tab },
       };
     }
+    // A pane's entry has no profile dir; moving to Chrome (restart) needs one.
+    if (!this.#entry.profileDir) this.#patch({ profileDir: join(PATHS.profiles, this.#entry.id) });
     const chrome = await this.#launchChrome(headless);
-    return { chromePid: chrome.pid, port: chrome.port, wsPath: chrome.wsPath, headless, smartTerminal: null };
+    return { chromePid: chrome.pid, port: chrome.port, wsPath: chrome.wsPath, profileDir: this.#entry.profileDir, headless, smartTerminal: null };
   }
 
   async #launch(plan) {
@@ -290,9 +300,9 @@ export class FleetSession {
       return adopted ? `devtools-fleet: reconnected to this session's existing browser ${this.#entry.id}.` : null;
     }
     if (this.#cdp.closed || !(await isChromeAlive(this.#entry))) {
-      const { state, allowedOrigins, headless, viewport, channel } = this.#entry;
+      const { state, allowedOrigins, headless, viewport, channel, chrome } = this.#entry;
       await this.#teardown({ keepBrowser: false });
-      await this.#start({ state: state ?? undefined, allowedOrigins: state ? undefined : allowedOrigins ?? undefined, headless, viewport, channel });
+      await this.#start({ state: state ?? undefined, allowedOrigins: state ? undefined : allowedOrigins ?? undefined, headless, viewport, channel, chrome: chrome ?? undefined });
       return `devtools-fleet: the browser had exited, so a fresh one was started (${this.#entry.id}${state ? `, state "${state}" reloaded` : ''}). Open tabs were lost.`;
     }
     if (!this.#upstream || this.#upstream.closed) {
@@ -350,6 +360,7 @@ export class FleetSession {
         viewport: this.#entry.viewport,
         channel: this.#entry.channel,
         smartTerminalTab: this.#entry.smartTerminal?.tab ?? null,
+        smartTerminalAvailable: Boolean(smartTerminalGate()),
         tabs,
         uptimeSeconds: Math.round((Date.now() - this.#entry.createdAt) / 1000),
         blockedRequests: this.#blocks.length,
@@ -357,13 +368,18 @@ export class FleetSession {
     });
   }
 
-  /** Relaunch with the same profile, cookies, storage and tabs, optionally switching headless. */
-  restart({ headless } = {}) {
-    return this.#serial(() => this.#restart({ headless }));
+  /**
+   * Relaunch with the same cookies, storage and tabs, optionally switching
+   * headless, or (chrome) between a Smart Terminal pane and a real Chrome.
+   */
+  restart({ headless, chrome } = {}) {
+    return this.#serial(() => this.#restart({ headless, chrome }));
   }
 
-  async #restart({ headless }) {
+  async #restart({ headless, chrome }) {
     if (!this.#entry) throw new Error('No browser is running in this session. Call browser_start first.');
+    if (chrome === false && this.#entry.strict) throw new Error('A strict state needs Chrome\'s own lockdown, so it can\'t move to a Smart Terminal pane.');
+    if (chrome === false && !smartTerminalGate()) throw new Error('Not running in a Smart Terminal tab, so there is no pane to move to.');
     await this.#ensureReady();
     const allowlist = this.#entry.allowedOrigins;
     const tabs = await openTabUrls(this.#cdp);
@@ -378,6 +394,11 @@ export class FleetSession {
     await closeChrome(previous, { cdp: this.#cdp });
     this.#cdp.close();
 
+    if (chrome !== undefined) {
+      this.#patch({ chrome });
+      // Into Chrome to be seen, so a window unless headless was asked for.
+      if (chrome && headless === undefined) headless = false;
+    }
     const opened = await this.#openBrowser(headless ?? this.#entry.headless);
     this.#cdp = await CdpConnection.connect(browserWsUrl(opened));
     await applyStorage(this.#cdp, snapshot);
