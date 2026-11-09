@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.1] - 2026-11-09
+
+### Fixed
+
+- **An agent in tmux got the pane of whichever Smart Terminal tab you were looking at.** Inside tmux, `SMART_TERMINAL_TAB` is the tab that started the tmux server, so fleet asked for the tab in front. It now asks tmux for the session's own `SMART_TERMINAL_TAB` (set by `cc-tmux` and by Smart Terminal's tmux restore) and sends the session's name too, so Smart Terminal 0.15.1 can find the tab showing it.
+
 ## [0.3.0] - 2026-11-08
 
 ### Added
