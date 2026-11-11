@@ -11,10 +11,13 @@ import { toolDefinitions, findFleetTool } from './tools/fleet-tools.js';
 const { version } = createRequire(import.meta.url)('../package.json');
 
 const INSTRUCTIONS = `devtools-fleet gives this session its own isolated Chrome with the full chrome-devtools-mcp toolset (${UPSTREAM_VERSION}).
+You run everything here yourself with these tools; don't hand the person terminal commands for any of it.
 - Any browser tool starts the browser on first use. Other agents have their own browsers; nothing is shared.
-- To work logged in, call state_list, then browser_start({ state: "<name>" }). A person creates states with \`devtools-fleet login\`.
+- To work logged in: state_list, then browser_start({ state: "<name>" }).
+- No fitting state, or its cookies expired? Call state_login({ name, url }): a window opens, the person logs in by hand, you call state_login_finish. Never type credentials yourself.
 - A browser started from a state can only reach that state's allowed origins. Blocked navigations say so; don't try to work around them, ask the person.
-- browser_restart({ headless: false }) shows a window, e.g. for the person to watch or solve a captcha.`;
+- The person wants to watch: browser_show. They need to type in the page (captcha, 2FA): browser_restart({ headless: false }).
+- A browser won't start: run fleet_doctor before asking the person anything.`;
 
 export async function startServer() {
   const config = loadConfig();

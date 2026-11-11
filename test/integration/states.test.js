@@ -1,6 +1,6 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { makeHome, cleanupHome, registry, FleetClient, runCli, spawnCli, startFixtures, waitFor, pageId, evalValue, sleep } from '../helpers/fleet.js';
 import { CdpConnection } from '../../src/lib/cdp.js';
@@ -171,7 +171,7 @@ test('agents may narrow but never widen an allowlist, and never overwrite a pers
 
   const overwrite = await c.call('state_save', { name: 'fixture-admin', overwrite: true });
   assert.equal(overwrite.isError, true);
-  assert.match(overwrite.text, /created by a person/);
+  assert.match(overwrite.text, /a login a person made/);
 
   const copy = await c.call('state_save', { name: 'agent-copy' });
   assert.equal(copy.isError, false, copy.text);
@@ -242,4 +242,96 @@ test('login refuses to overwrite without --overwrite', async () => {
   const r = await runCli(home, ['login', 'fixture-admin', `${fx.appOrigin}/login`, '--headless', '--yes']);
   assert.equal(r.code, 1);
   assert.match(r.stderr, /already exists/);
+});
+
+/** Log in the way a person would, inside the window state_login opened for agent `c`. */
+async function personLogsIn(c) {
+  const entry = await waitFor(() => registry(home).find((e) => e.fleetPid === c.pid && e.port), { what: 'login window' });
+  const version = await (await fetch(`http://127.0.0.1:${entry.port}/json/version`)).json();
+  const cdp = await CdpConnection.connect(version.webSocketDebuggerUrl);
+  const page = await waitFor(async () => (await cdp.send('Target.getTargets')).targetInfos.find((t) => t.type === 'page' && t.url.endsWith('/login')), { what: 'login page (after SSO)' });
+  const { sessionId } = await cdp.send('Target.attachToTarget', { targetId: page.targetId, flatten: true });
+  await cdp.send('Runtime.evaluate', { expression: 'document.getElementById("u").value = "admin"; document.getElementById("p").value = "pw"; document.forms[0].submit()' }, sessionId);
+  await waitFor(async () => (await cdp.send('Runtime.evaluate', { expression: 'document.title', returnByValue: true }, sessionId)).result.value === 'WELCOME', { what: 'login to complete' });
+  cdp.close();
+  return entry;
+}
+
+test('state_login: the agent opens the window, the person logs in, the state is the person\'s', async () => {
+  const c = await FleetClient.start({ home, env: { DEVTOOLS_FLEET_LOGIN_HEADLESS: '1' } });
+  const opened = await c.call('state_login', { name: 'via-agent', url: `${fx.appOrigin}/sso-start` });
+  assert.equal(opened.isError, false, opened.text);
+  assert.match(opened.text, /Log in in the Chrome window/);
+  const entry = await personLogsIn(c);
+
+  const proposal = await c.call('state_login_finish');
+  assert.equal(proposal.isError, false, proposal.text);
+  assert.match(proposal.text, new RegExp(`would only be usable on:\\n\\s+${fx.appOrigin.replace(/[.]/g, '\\.')}`));
+  assert.match(proposal.text, new RegExp(`left out:\\n\\s+${fx.outsideOrigin.replace(/[.]/g, '\\.')}`));
+  assert.equal(existsSync(join(home, 'states', 'via-agent.json')), false, 'nothing saved before confirm');
+
+  const saved = await c.call('state_login_finish', { confirm: true });
+  assert.equal(saved.isError, false, saved.text);
+  assert.match(saved.text, /Saved state "via-agent": 1 cookie/);
+  assert.equal(registry(home).some((e) => e.id === entry.id), false, 'login window closed and deregistered');
+  const state = JSON.parse(readFileSync(join(home, 'states', 'via-agent.json'), 'utf8'));
+  assert.equal(state.devtoolsFleet.createdBy, 'person');
+  assert.deepEqual(state.devtoolsFleet.allowedOrigins, [fx.appOrigin]);
+  assert.ok(!JSON.stringify(state).includes('SSO-SECRET'), 'the SSO provider\'s cookie was not saved');
+
+  // Usable straight away, and protected like a CLI login.
+  await c.call('browser_start', { state: 'via-agent', url: `${fx.appOrigin}/app` });
+  await sleep(500);
+  const pages = await c.call('list_pages');
+  assert.equal(evalValue((await c.call('evaluate_script', { pageId: pageId(pages.text, '/app'), function: '() => document.title' })).text), 'user=admin ls=from-login');
+  assert.match((await c.call('state_save', { name: 'via-agent', overwrite: true })).text, /a login a person made/);
+  assert.match((await c.call('state_delete', { name: 'via-agent' })).text, /can't delete it/);
+  assert.match((await c.call('state_login', { name: 'via-agent', url: `${fx.appOrigin}/login` })).text, /browser_stop first|already exists/);
+  await c.call('browser_stop');
+
+  // Logging in again keeps the person's allowlist.
+  assert.match((await c.call('state_login', { name: 'via-agent', url: `${fx.appOrigin}/login` })).text, /already exists/);
+  assert.equal((await c.call('state_login', { name: 'via-agent', url: `${fx.appOrigin}/sso-start`, overwrite: true })).isError, false);
+  await personLogsIn(c);
+  assert.match((await c.call('state_login_finish', { allowedOrigins: [fx.outsideOrigin] })).text, /keeps its allowed origins/);
+  assert.equal((await c.call('state_login_finish', { confirm: true })).isError, false);
+  assert.deepEqual(JSON.parse(readFileSync(join(home, 'states', 'via-agent.json'), 'utf8')).devtoolsFleet.allowedOrigins, [fx.appOrigin]);
+  await c.close();
+});
+
+test('state_login_finish without a login, and after the window was closed', async () => {
+  const c = await FleetClient.start({ home, env: { DEVTOOLS_FLEET_LOGIN_HEADLESS: '1' } });
+  assert.match((await c.call('state_login_finish')).text, /No login is in progress/);
+  await c.call('state_login', { name: 'abandoned', url: `${fx.appOrigin}/login` });
+  const entry = await waitFor(() => registry(home).find((e) => e.fleetPid === c.pid && e.port), { what: 'login window' });
+  process.kill(entry.chromePid);
+  await sleep(1000);
+  const r = await c.call('state_login_finish', { confirm: true });
+  assert.equal(r.isError, true);
+  assert.match(r.text, /closed before the login was saved/);
+  assert.equal(existsSync(join(home, 'states', 'abandoned.json')), false);
+  await c.close();
+});
+
+test('state_delete removes agent states only; browser_show and fleet_doctor', async () => {
+  const c = await FleetClient.start({ home });
+  await c.call('browser_start', { state: 'fixture-admin', url: `${fx.appOrigin}/app` });
+  await sleep(500);
+  assert.equal((await c.call('state_save', { name: 'scratch' })).isError, false);
+  assert.match((await c.call('state_delete', { name: 'scratch' })).text, /Deleted state "scratch"/);
+  assert.equal(existsSync(join(home, 'states', 'scratch.json')), false);
+  assert.match((await c.call('state_delete', { name: 'fixture-admin' })).text, /can't delete it/);
+
+  const shown = await c.call('browser_show', { open: false });
+  assert.equal(shown.isError, false, shown.text);
+  const url = /http:\/\/127\.0\.0\.1:\d+\/devtools\/inspector\.html\S+/.exec(shown.text)?.[0];
+  assert.ok(url, shown.text);
+  assert.equal((await fetch(url)).status, 200, 'the inspector loads');
+
+  const doctor = await c.call('fleet_doctor');
+  assert.match(doctor.text, /ok\s+node/);
+  assert.match(doctor.text, /ok\s+chrome/);
+  await c.call('browser_stop');
+  assert.match((await c.call('browser_show', { open: false })).text, /No browser is running/);
+  await c.close();
 });

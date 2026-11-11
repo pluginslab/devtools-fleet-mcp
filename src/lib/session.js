@@ -2,7 +2,7 @@ import { rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { PATHS } from './config.js';
 import { CdpConnection } from './cdp.js';
-import { launchChrome, closeChrome, browserWsUrl, resolveChromePath, isChromeAlive } from './chrome.js';
+import { launchChrome, closeChrome, browserWsUrl, resolveChromePath, isChromeAlive, listPages, inspectorUrl } from './chrome.js';
 import { withLock } from './lock.js';
 import { newBrowserId, writeEntry, updateEntry, removeEntry, listEntries, classify } from './registry.js';
 import { pruneRegistry, ensureReaper } from './reaper.js';
@@ -11,7 +11,9 @@ import { checkUrl, normalizeOriginPatterns, isSubset, patternMatchesOrigin } fro
 import { checkToolCall } from './policy.js';
 import { lockdownArgs } from './lockdown.js';
 import { applyStorage, captureStorage, openOrigins, openTabUrls } from './storage.js';
-import { readState, writeState, stateExists, summarizeState } from './states.js';
+import { readState, writeState, stateExists, summarizeState, deleteState, assertStateName } from './states.js';
+import { trackVisitedOrigins, proposeLoginAllowlist, loginStorageOrigins } from './login-origins.js';
+import { openUrl } from './open-url.js';
 import { Upstream } from './upstream.js';
 import { anchorMatches } from './process-tree.js';
 
@@ -34,6 +36,8 @@ export class FleetSession {
   #blocks = [];
   #queue = Promise.resolve();
   #rootsProvider = null;
+  // A state_login in progress: { name, startOrigin, visited, extra, strict, refresh, stopTracking }.
+  #login = null;
 
   constructor(config, anchor) {
     this.#config = config;
@@ -143,7 +147,7 @@ export class FleetSession {
       const lines = running.map((e) => `  ${e.id}  ${classify(e).padEnd(8)}  ${e.anchorLabel ?? ''}  ${e.cwd ?? ''}`).join('\n');
       throw new Error(
         `devtools-fleet is at its limit of ${this.#config.maxBrowsers} browsers.\n${lines}\n` +
-        'Run `devtools-fleet gc` to close orphans, `devtools-fleet kill <id>` to close one, or raise maxBrowsers.',
+        'Tell the person: these belong to other sessions, so closing them is their call. `devtools-fleet gc` in a terminal closes the ones whose session ended, `devtools-fleet kill <id>` closes one, or they can raise maxBrowsers.',
       );
     }
 
@@ -393,8 +397,8 @@ export class FleetSession {
     await this.#ensureReady();
     if (stateExists(name)) {
       const existing = summarizeState(readState(name));
-      if (existing.createdBy === 'cli') {
-        throw new Error(`State "${name}" was created by a person with \`devtools-fleet login\`; agents can't overwrite it. Pick another name.`);
+      if (existing.createdBy !== 'agent') {
+        throw new Error(`State "${name}" holds a login a person made; state_save can't overwrite it. Pick another name, or call state_login({ name: "${name}", url, overwrite: true }) to have the person log in again.`);
       }
       if (!overwrite) throw new Error(`State "${name}" already exists. Pass overwrite: true to replace it.`);
     }
@@ -421,6 +425,127 @@ export class FleetSession {
     });
   }
 
+
+  // ------------------------------------------------------------- logins
+
+  /**
+   * Open a visible window at a login page for the person to log in by hand.
+   * The browser has no allowlist yet (SSO hops anywhere); state_login_finish
+   * saves the login with an allowlist and closes it.
+   */
+  stateLogin(opts) {
+    return this.#serial(() => this.#stateLogin(opts));
+  }
+
+  async #stateLogin({ name, url, allow = [], strict = false, overwrite = false }) {
+    assertStateName(name);
+    const start = new URL(url);
+    if (!['http:', 'https:'].includes(start.protocol)) throw new Error('The login URL must be http(s)');
+    let refresh = null;
+    if (stateExists(name)) {
+      const existing = summarizeState(readState(name));
+      const personMade = existing.createdBy !== 'agent';
+      if (!overwrite) {
+        throw new Error(`State "${name}" already exists (${personMade ? 'a login a person made' : 'saved by an agent'}). ` +
+          `Pass overwrite: true to log in again and replace it${personMade ? '; it keeps its allowed origins' : ''}, or pick another name.`);
+      }
+      if (personMade) refresh = existing;
+    }
+    if (this.#entry && !this.#cdp?.closed) {
+      throw new Error(`This session already has a browser (${this.#entry.id}). Call browser_stop first: the login opens a window of its own.`);
+    }
+    // Test seam: CI has no display. Never set this for a real login.
+    const headless = process.env.DEVTOOLS_FLEET_LOGIN_HEADLESS === '1';
+    await this.#start({ headless });
+    const visited = [start.origin];
+    const stopTracking = trackVisitedOrigins(this.#cdp, visited);
+    // The guard turns discovery on only for an allowlist, and a login browser has none.
+    await this.#cdp.send('Target.setDiscoverTargets', { discover: true });
+    this.#login = {
+      name,
+      startOrigin: start.origin,
+      visited,
+      extra: refresh ? [] : normalizeOriginPatterns(allow),
+      strict: refresh ? refresh.strict : strict,
+      refresh,
+      stopTracking,
+    };
+    await this.#navigateFirstTab(url);
+    return { id: this.#entry.id, url, refresh: Boolean(refresh) };
+  }
+
+  /** Propose the allowlist (confirm false) or save the login and close its window (confirm true). */
+  stateLoginFinish(opts) {
+    return this.#serial(() => this.#stateLoginFinish(opts));
+  }
+
+  async #stateLoginFinish({ confirm = false, allowedOrigins } = {}) {
+    const login = this.#login;
+    if (!login) throw new Error('No login is in progress in this session. Call state_login first.');
+    if (this.#cdp?.closed || !(await isChromeAlive(this.#entry))) {
+      await this.#teardown({ keepBrowser: false });
+      throw new Error('The login window was closed before the login was saved, so nothing was saved. Call state_login again and ask the person to leave the window open.');
+    }
+    const landed = await openOrigins(this.#cdp).catch(() => []);
+    let allow;
+    let passedThrough;
+    if (login.refresh) {
+      if (allowedOrigins?.length) {
+        throw new Error(`"${login.name}" is a login a person made; logging in again keeps its allowed origins (${login.refresh.allowedOrigins.join(', ')}). To change them, save under a new name.`);
+      }
+      allow = login.refresh.allowedOrigins;
+      passedThrough = login.visited.filter((o) => !checkUrl(allow, o).allowed);
+    } else {
+      ({ proposed: allow, passedThrough } = proposeLoginAllowlist({ startOrigin: login.startOrigin, landed, extra: login.extra, visited: login.visited }));
+      if (allowedOrigins?.length) allow = normalizeOriginPatterns(allowedOrigins);
+    }
+    const proposal = { name: login.name, allowedOrigins: allow, passedThrough, strict: login.strict, refresh: Boolean(login.refresh), landed };
+    if (!confirm) return { saved: false, ...proposal };
+
+    const snapshot = await captureStorage(this.#cdp, { cookieAllowlist: allow, storageOrigins: loginStorageOrigins(allow, login.visited) });
+    const summary = writeState({
+      name: login.name,
+      cookies: snapshot.cookies,
+      origins: snapshot.origins,
+      allowedOrigins: allow,
+      strict: login.strict,
+      // The person typed the credentials; the agent only opened the window.
+      createdBy: 'person',
+    });
+    const closed = this.#entry.id;
+    await this.#teardown({ keepBrowser: false });
+    return { saved: true, ...proposal, summary, closed };
+  }
+
+  /** Delete a state an agent saved. Logins a person made stay until the person removes them. */
+  deleteState(name) {
+    const existing = summarizeState(readState(name));
+    if (existing.createdBy !== 'agent') {
+      throw new Error(`State "${name}" holds a login a person made; agents can't delete it. The person can run \`devtools-fleet state rm ${name}\`.`);
+    }
+    deleteState(name);
+    return existing;
+  }
+
+  // ------------------------------------------------------------- watching
+
+  /** The DevTools screencast URL for one of this session's tabs, opened in the person's browser unless open is false. */
+  show({ tab, open = true } = {}) {
+    return this.#serial(async () => {
+      if (!this.#entry || this.#cdp?.closed || !(await isChromeAlive(this.#entry))) {
+        throw new Error('No browser is running in this session. Start one (browser_start, or any browser tool) first.');
+      }
+      const pages = await listPages(this.#entry);
+      if (!pages.length) throw new Error('The browser has no open tabs to show.');
+      const index = tab ? tab - 1 : Math.max(0, pages.findIndex((p) => /^https?:/.test(p.url)));
+      const page = pages[index];
+      if (!page) throw new Error(`No tab ${tab}; there are ${pages.length}.`);
+      const url = inspectorUrl(this.#entry, page.id);
+      const opened = open ? await openUrl(url) : false;
+      return { url, opened, index: index + 1, pages };
+    });
+  }
+
   // ------------------------------------------------------------- lifecycle
 
   async #stopUpstreamAndGuard() {
@@ -432,6 +557,8 @@ export class FleetSession {
 
   async #teardown({ keepBrowser }) {
     clearInterval(this.#heartbeat);
+    this.#login?.stopTracking();
+    this.#login = null;
     await this.#stopUpstreamAndGuard().catch(() => {});
     const entry = this.#entry;
     if (entry && !keepBrowser) {

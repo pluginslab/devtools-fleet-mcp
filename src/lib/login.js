@@ -6,9 +6,10 @@ import { CdpConnection } from './cdp.js';
 import { launchChrome, closeChrome, browserWsUrl, resolveChromePath } from './chrome.js';
 import { newBrowserId, writeEntry, updateEntry, removeEntry } from './registry.js';
 import { ensureReaper } from './reaper.js';
-import { captureStorage, toPlaywrightCookie, openOrigins, PLACEHOLDER_PATH } from './storage.js';
+import { captureStorage, toPlaywrightCookie, openOrigins } from './storage.js';
 import { writeState, stateExists, assertStateName } from './states.js';
-import { normalizeOriginPatterns, checkUrl, cookieMatchesAllowlist } from './origins.js';
+import { normalizeOriginPatterns, cookieMatchesAllowlist } from './origins.js';
+import { trackVisitedOrigins, proposeLoginAllowlist, loginStorageOrigins } from './login-origins.js';
 
 // `devtools-fleet login <name> <url>`: a person logs in by hand in a visible
 // window (2FA, SSO, captchas all fine), fleet records every origin they pass
@@ -69,19 +70,7 @@ export async function login({ name, url, allow = [], strict = false, overwrite =
 
     // Every top-level origin the person passes through (login page, SSO provider, the app).
     const visited = [start.origin];
-    const note = (targetInfo) => {
-      if (targetInfo.type !== 'page') return;
-      try {
-        const u = new URL(targetInfo.url);
-        if ((u.protocol === 'http:' || u.protocol === 'https:') && u.pathname !== PLACEHOLDER_PATH && !visited.includes(u.origin)) {
-          visited.push(u.origin);
-        }
-      } catch {
-        // about:blank etc.
-      }
-    };
-    cdp.on('Target.targetCreated', ({ targetInfo }) => note(targetInfo));
-    cdp.on('Target.targetInfoChanged', ({ targetInfo }) => note(targetInfo));
+    trackVisitedOrigins(cdp, visited);
     await cdp.send('Target.setDiscoverTargets', { discover: true });
 
     // Closing the last window quits Chrome on Linux and Windows; keep a recent
@@ -100,12 +89,8 @@ export async function login({ name, url, allow = [], strict = false, overwrite =
     await io.waitForEnter(() => browserGone);
     clearInterval(poll);
 
-    // Default: where the login started and where it ended up (tabs still open),
-    // plus --allow. Origins only passed through (an SSO provider, usually) are
-    // left out: saving their cookies would hand agents the whole SSO session.
     const landed = browserGone ? [] : await openOrigins(cdp).catch(() => []);
-    const proposed = normalizeOriginPatterns([start.origin, ...landed, ...extraAllow]);
-    const passedThrough = visited.filter((o) => !checkUrl(proposed, o).allowed);
+    const { proposed, passedThrough } = proposeLoginAllowlist({ startOrigin: start.origin, landed, extra: extraAllow, visited });
     let allowedOrigins = proposed;
     io.print(`\nThis state will only be usable on:\n${proposed.map((o) => `  ${o}`).join('\n')}`);
     if (passedThrough.length) {
@@ -121,11 +106,7 @@ export async function login({ name, url, allow = [], strict = false, overwrite =
 
     let snapshot;
     if (!browserGone) {
-      const storageOrigins = [...new Set([
-        ...allowedOrigins.filter((p) => !p.includes('*')),
-        ...visited.filter((o) => checkUrl(allowedOrigins, o).allowed),
-      ])];
-      snapshot = await captureStorage(cdp, { cookieAllowlist: allowedOrigins, storageOrigins });
+      snapshot = await captureStorage(cdp, { cookieAllowlist: allowedOrigins, storageOrigins: loginStorageOrigins(allowedOrigins, visited) });
     } else {
       if (!lastCookies) throw new Error('The browser closed before anything could be saved. Run login again and press Enter before closing the window.');
       io.print('The browser was closed, so localStorage could not be read. Saving cookies only.');

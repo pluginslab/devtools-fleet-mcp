@@ -1,16 +1,16 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
-import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { statSync } from 'node:fs';
 import { PATHS, loadConfig } from '../src/lib/config.js';
 import { listEntries, readEntry, removeEntry, classify } from '../src/lib/registry.js';
-import { isChromeAlive, listPages, inspectorUrl, resolveChromePath } from '../src/lib/chrome.js';
+import { isChromeAlive, listPages, inspectorUrl } from '../src/lib/chrome.js';
 import { reapOnce, closeEntryBrowser } from '../src/lib/reaper.js';
 import { listStates, readState, summarizeState, deleteState, importState } from '../src/lib/states.js';
 import { login } from '../src/lib/login.js';
 import { UPSTREAM_VERSION } from '../src/lib/upstream.js';
 import { withLock } from '../src/lib/lock.js';
+import { runChecks, formatChecks } from '../src/lib/doctor.js';
+import { openUrl } from '../src/lib/open-url.js';
 
 const { version } = createRequire(import.meta.url)('../package.json');
 const program = new Command();
@@ -102,7 +102,7 @@ program
     const url = inspectorUrl(e, page.id);
     if (print) return console.log(url);
     console.log(`\nOpening tab ${index + 1} in your default browser:\n${url}`);
-    openInBrowser(url);
+    if (!(await openUrl(url))) console.log('(no browser to open it here: copy the URL)');
   });
 
 // -------------------------------------------------------------------- states
@@ -173,39 +173,10 @@ state
 program
   .command('doctor')
   .description('Check Chrome, Node, permissions and configuration')
-  .action(async () => {
-    let ok = true;
-    const check = (label, fn) => {
-      try {
-        const detail = fn();
-        console.log(`ok    ${label}${detail ? `: ${detail}` : ''}`);
-      } catch (err) {
-        ok = false;
-        console.log(`FAIL  ${label}: ${err.message}`);
-      }
-    };
-    let config;
-    check('config', () => { config = loadConfig(); return PATHS.config; });
-    check('node', () => {
-      const [major, minor] = process.versions.node.split('.').map(Number);
-      if (major < 22 || (major === 22 && minor < 12)) throw new Error(`${process.versions.node}; need 22.12 or newer`);
-      return process.versions.node;
-    });
-    if (config) check(`chrome (${config.channel})`, () => resolveChromePath(config));
-    check('chrome-devtools-mcp', () => UPSTREAM_VERSION);
-    check('fleet home', () => {
-      try {
-        const mode = statSync(PATHS.home).mode & 0o777;
-        if (mode & 0o077) throw new Error(`${PATHS.home} is readable by others (mode ${mode.toString(8)}); run chmod 700`);
-      } catch (err) {
-        if (err.code !== 'ENOENT') throw err;
-        return `${PATHS.home} (created on first use)`;
-      }
-      return PATHS.home;
-    });
-    check('states', () => `${listStates().length} saved`);
-    check('browsers', () => `${listEntries().length} registered`);
-    process.exitCode = ok ? 0 : 1;
+  .action(() => {
+    const results = runChecks();
+    console.log(formatChecks(results));
+    process.exitCode = results.every((r) => r.ok) ? 0 : 1;
   });
 
 program
@@ -236,11 +207,4 @@ function table(rows) {
   const line = (cells) => cells.map((cell, i) => String(cell ?? '').padEnd(widths[i])).join('  ').trimEnd();
   console.log(line(cols));
   for (const r of rows) console.log(line(cols.map((c) => r[c])));
-}
-
-function openInBrowser(url) {
-  const [cmd, args] = process.platform === 'darwin' ? ['open', [url]]
-    : process.platform === 'win32' ? ['cmd', ['/c', 'start', '', url]]
-      : ['xdg-open', [url]];
-  spawn(cmd, args, { detached: true, stdio: 'ignore' }).unref();
 }

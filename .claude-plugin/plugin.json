@@ -1,6 +1,6 @@
 {
   "name": "devtools-fleet",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "One isolated Chrome per agent, running Google's chrome-devtools-mcp tools, with saved login states and origin allowlists",
   "author": {
     "name": "Marcel Schmitz",
@@ -14,7 +14,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "devtools-fleet-mcp"
+        "devtools-fleet-mcp@0.5.0"
       ]
     }
   }

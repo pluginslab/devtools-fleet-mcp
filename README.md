@@ -30,10 +30,10 @@ agent session B ─stdio─▶ devtools-fleet-mcp ─▶ chrome-devtools-mcp --b
 
 1. **One browser per agent, zero config.** The first browser tool call launches that session's own Chrome. Up to 10 at once by default.
 2. **Browsers outlive the connection.** An agent that reconnects inside the same session gets its browser back, tabs open. A small background reaper closes the browsers nobody comes back for.
-3. **Saved logins.** You log in once, by hand, in a real window (2FA, SSO and captchas are fine). Any number of agents can then start from that login in parallel, each in its own browser.
+3. **Saved logins.** Ask the agent to log you in: it opens a real window, you type the password (2FA, SSO and captchas are fine), it saves the result. Any number of agents can then start from that login in parallel, each in its own browser.
 4. **Origin allowlists.** A browser started from a saved login can only reach that login's origins. Typed URLs, link clicks, redirects and popups elsewhere are blocked. Strict mode locks the whole network in Chrome itself.
 5. **Recovery.** If Chrome or chrome-devtools-mcp dies, the next tool call brings it back and tells the agent what happened.
-6. **Watch any agent live.** `devtools-fleet show <id>` opens Chrome's DevTools inspector on that agent's page without disturbing it.
+6. **Watch any agent live.** Ask it to show you its browser (`browser_show`), or run `devtools-fleet show <id>` for any agent's. Either opens Chrome's DevTools inspector on that page without disturbing the agent.
 
 ## Quick Start
 
@@ -109,19 +109,21 @@ devtools-fleet ls
 
 ### First saved login
 
-```bash
-devtools-fleet login staging-admin https://staging.example.com/wp-login.php
-```
+Ask an agent:
 
-Log in in the window that opens, come back to the terminal, press Enter, confirm the allowlist. Then ask an agent:
+> "Log me in to staging as staging-admin: https://staging.example.com/wp-login.php"
+
+It calls `state_login`, a Chrome window opens, and you log in there. Tell the agent when you're done. It shows you which origins the login will be usable on, and saves it once you agree. Then:
 
 > "Using the staging-admin state, open the Plugins page and run a Lighthouse audit on it."
 
 The agent calls `state_list`, then `browser_start({ state: "staging-admin" })`, and starts already logged in.
 
+You can also log in from a terminal, with no agent involved: `devtools-fleet login staging-admin https://staging.example.com/wp-login.php`. Log in in the window that opens, come back to the terminal, press Enter, confirm the allowlist.
+
 ## MCP Tools
 
-devtools-fleet adds six tools. Everything else (`navigate_page`, `take_snapshot`, `click`, `evaluate_script`, `list_network_requests`, `performance_start_trace`, `lighthouse_audit`, …) is chrome-devtools-mcp's, with the same names and arguments, so its documentation and skills apply as-is.
+devtools-fleet adds eleven tools. Everything else (`navigate_page`, `take_snapshot`, `click`, `evaluate_script`, `list_network_requests`, `performance_start_trace`, `lighthouse_audit`, …) is chrome-devtools-mcp's, with the same names and arguments, so its documentation and skills apply as-is.
 
 ### `browser_start`
 
@@ -162,7 +164,19 @@ Relaunches keeping cookies, storage and tabs. `{ headless: false }` gives a visi
 
 ```
 → browser_restart({ headless: false })
-← Restarted in a Chrome window; reopened 2 tab(s). Page ids have changed: call list_pages.
+← Restarted with a visible window; reopened 2 tab(s). Page ids have changed: call list_pages.
+```
+
+### `browser_show`
+
+Opens a live DevTools screencast of one of this session's tabs in the person's default browser, and returns the URL. Nothing reloads and the agent keeps working; headless browsers can be watched too. `{ open: false }` only returns the URL. `{ tab: n }` picks a tab.
+
+```
+→ browser_show()
+← 1. Plugins ‹ Staging  https://staging.example.com/wp-admin/plugins.php
+
+  Opened tab 1 for the person to watch:
+  http://127.0.0.1:52144/devtools/inspector.html?ws=127.0.0.1:52144/devtools/page/…
 ```
 
 ### `browser_stop`
@@ -176,7 +190,7 @@ Closes the browser and deletes its temporary profile.
 
 ### `state_save`
 
-Saves the current browser's login under a name. Parameters: `name`, `allowedOrigins` (defaults to the open tabs' origins), `strict`, `overwrite`. An agent can only narrow its own allowlist, never widen it, and never overwrites a state a person created.
+Saves the current browser's login under a name. Parameters: `name`, `allowedOrigins` (defaults to the open tabs' origins), `strict`, `overwrite`. An agent can only narrow its own allowlist, never widen it, and never overwrites a login a person made. For a fresh login by the person, `state_login` is the better fit.
 
 ```
 → state_save({ name: "local-shop" })
@@ -189,9 +203,45 @@ Saved states with origins, cookie counts and expiry. Never values.
 
 ```
 → state_list()
-← staging-admin: https://staging.example.com | 6 cookies (0 expired) | saved 2026-10-01T09:12:44.512Z by cli
-  local-shop: http://localhost:3000 | 4 cookies (0 expired) | saved 2026-10-01T10:03:10.087Z by agent
+← staging-admin: https://staging.example.com | 6 cookies (0 expired) | saved 2026-10-01T09:12:44.512Z by a person (CLI)
+  local-shop: http://localhost:3000 | 4 cookies (0 expired) | saved 2026-10-01T10:03:10.087Z by an agent
 ```
+
+### `state_login` and `state_login_finish`
+
+The person logs in; the agent does everything else. `state_login({ name, url })` opens a visible Chrome window at `url` (the session must have no browser running). The person logs in by hand and tells the agent. `state_login_finish()` then proposes the allowlist: where the login started and where it ended up, with origins only passed through (an SSO provider) left out, exactly as `devtools-fleet login` does. The agent shows it to the person, and `state_login_finish({ confirm: true })` saves it and closes the window.
+
+The state is recorded as made by a person: agents can't overwrite or delete it. `state_login({ name, url, overwrite: true })` logs in again over an expired state and keeps its allowed origins.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `name` | string | State name |
+| `url` | string | Where the person starts, usually the login page |
+| `allow` | string[] | Extra origins, beyond where the login starts and ends |
+| `strict` | boolean | Block every request outside the allowlist when the state is used |
+| `overwrite` | boolean | Log in again over an existing state |
+
+`state_login_finish` takes `confirm` and, for a new state, `allowedOrigins` to use instead of the proposal.
+
+```
+→ state_login({ name: "staging-admin", url: "https://staging.example.com/wp-login.php" })
+← A Chrome window (browser 7d01e4) is open at https://staging.example.com/wp-login.php. …
+→ state_login_finish()
+← State "staging-admin" would only be usable on:
+    https://staging.example.com
+  Visited during the login but left out:
+    https://accounts.google.com
+→ state_login_finish({ confirm: true })
+← Saved state "staging-admin": 6 cookie(s), localStorage for 1 origin(s). Usable on: https://staging.example.com. …
+```
+
+### `state_delete`
+
+Deletes a state an agent saved with `state_save`. Logins a person made are refused; remove those with `devtools-fleet state rm`.
+
+### `fleet_doctor`
+
+The same checks as `devtools-fleet doctor` (Node, which Chrome, chrome-devtools-mcp version, permissions, config, states, browsers), so the agent can diagnose a browser that won't start itself.
 
 ## CLI Reference
 

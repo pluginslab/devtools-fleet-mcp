@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.5.0] - 2026-11-11
+
+The agent now does the browser work it used to hand to you as terminal commands. Your part is only what needs a person: typing a password, passing 2FA, agreeing to where a login may be used.
+
+### Added
+
+- **`state_login` and `state_login_finish`: the agent gets you logged in.** It opens a visible Chrome window at the login page, you log in by hand, and it saves the result with the same allowlist rules as `devtools-fleet login` (where you started and ended up; SSO providers you only passed through are left out). It shows you the allowlist before saving. The state counts as yours (`createdBy: "person"`): agents can't overwrite or delete it, and logging in again over an expired state keeps its allowed origins.
+- **`browser_show`** opens a live DevTools screencast of the agent's tab in your browser, like `devtools-fleet show`, without you looking up the id. `open: false` only returns the URL.
+- **`state_delete`** for states an agent saved. Logins a person made are refused.
+- **`fleet_doctor`**: the `devtools-fleet doctor` checks as a tool, so the agent diagnoses a browser that won't start before asking you.
+
+### Changed
+
+- **The plugin pins the npm version** (`devtools-fleet-mcp@0.5.0`). The plugin runs the server from npm, so before this it ran whatever `latest` was, whatever version the plugin said. A unit test keeps the pin and `package.json` in step.
+- The server instructions, the skill and the tool descriptions tell the agent to do this work itself and not to hand out `devtools-fleet` commands. `state_list` with nothing saved points at `state_login`. The skill triggers on "log me in to", "save my login", "show me the browser", "let me watch".
+- `state_save` refuses to overwrite any login a person made, from the CLI or through `state_login`.
+- The CLI's `doctor` and `show` share their code with the new tools; `show` says so when there's no browser to open the URL in.
+
 ## [0.4.0] - 2026-11-11
 
 ### Removed
