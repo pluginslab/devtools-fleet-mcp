@@ -143,7 +143,6 @@ Starts this session's browser, or picks it up again after a reconnect. Optional:
 | `channel` | string | `stable`, `beta`, `dev` or `canary` |
 | `url` | string | Open this in the first tab |
 | `allowedOrigins` | string[] | Without a state: restrict this browser voluntarily |
-| `chrome` | boolean | In a Smart Terminal tab: a real Chrome instead of the pane, with a window unless `headless: true` |
 
 ### `browser_status`
 
@@ -159,7 +158,7 @@ This session's browser: id, state, allowlist, mode, open tabs, uptime, blocked r
 
 ### `browser_restart`
 
-Relaunches keeping cookies, storage and tabs. `{ headless: false }` gives a visible window, for example so a person can solve a captcha. In a Smart Terminal tab, `{ chrome: true }` moves the browser from the pane into a Chrome window and `{ chrome: false }` moves it back.
+Relaunches keeping cookies, storage and tabs. `{ headless: false }` gives a visible window, for example so a person can solve a captcha.
 
 ```
 → browser_restart({ headless: false })
@@ -305,26 +304,6 @@ chrome-devtools-mcp only reads and writes files (screenshots, traces, uploads) i
 
 `DEVTOOLS_FLEET_HOME` moves the whole directory.
 
-## In a Smart Terminal tab
-
-Run inside a [Smart Terminal](https://github.com/pluginslab/smart-terminal) tab (0.11.0
-or later), devtools-fleet doesn't launch Chrome: the agent's browser is that tab's
-browser pane, a Chromium running inside the app, beside the session it belongs to. You
-watch it work and can take over to log in or solve a captcha. Nothing else changes:
-the same tools, saved logins, allowlists, reconnects and cleanup.
-
-Smart Terminal tells its shells where to ask (`SMART_TERMINAL_GATE`, a file readable by
-you alone with a local endpoint and its token, and `SMART_TERMINAL_TAB`). Each browser
-it hands out has its own in-memory profile and a DevTools connection that shows that
-browser's pages only, never your own pages in the app or another agent's.
-
-- **Desktop or mobile.** Pages get a desktop layout (1366 CSS px, zoomed to fit the pane). `emulate` with a viewport, e.g. `390x844x3,mobile,touch`, switches the pane to that phone and `emulate` without one switches back (Smart Terminal 0.13.0 or later; before, the zoom and the phone metrics compounded and clicks missed). The pane's phone/desktop button does the same for the person watching.
-- **Chrome when you want it.** Ask the agent for a real Chrome and it calls `browser_start({ chrome: true })`, or `browser_restart({ chrome: true })` to move a running browser out of the pane with its cookies and tabs (`chrome: false` moves it back). For sites that refuse embedded browsers, such as Google sign-in. `"smartTerminal": false` in the config, or `DEVTOOLS_FLEET_SMART_TERMINAL=0`, makes Chrome the default.
-- **Strict states still get a Chrome:** their lockdown is set at Chrome's launch.
-- **`headless` doesn't apply,** and `show` has nothing to open: the pane is the window.
-
-Outside Smart Terminal nothing of this applies.
-
 ## Configuration
 
 `~/.devtools-fleet/config.json`, every key optional. Environment variables override the file.
@@ -350,7 +329,7 @@ chrome-devtools-mcp collects usage statistics by default and may send performanc
 - **Sites with device-bound sessions** (Device Bound Session Credentials) won't accept copied cookies.
 - **Google accounts are not supported.** Google blocks automated sign-in and binds sessions to devices.
 - **Headless can't switch to a window in place.** `browser_restart` relaunches, and the pages reload.
-- **The debugging port is local-only but not authenticated,** the same as chrome-devtools-mcp and every CDP tool: other processes running as your user can drive these browsers. In a Smart Terminal tab there is no port, only the app's token-protected gate.
+- **The debugging port is local-only but not authenticated,** the same as chrome-devtools-mcp and every CDP tool: other processes running as your user can drive these browsers.
 
 ## Companion Tools
 

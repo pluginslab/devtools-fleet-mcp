@@ -1,6 +1,6 @@
 {
   "name": "devtools-fleet-mcp",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "type": "module",
   "description": "chrome-devtools-mcp for ten agents at once: one isolated Chrome per agent, saved login states, origin allowlists, and a CLI to see and reap them all",
   "main": "src/index.js",

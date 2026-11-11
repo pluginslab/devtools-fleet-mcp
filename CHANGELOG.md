@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.4.0] - 2026-11-11
+
+### Removed
+
+- **Smart Terminal panes.** devtools-fleet always launches its own Chrome again, as before 0.2.0, also inside a Smart Terminal tab: Smart Terminal 0.16.0 removed its browser pane and the DevTools gate behind it. `SMART_TERMINAL_GATE` and `SMART_TERMINAL_TAB` are no longer read, and fleet no longer asks tmux for the tab.
+- The `chrome` option of `browser_start` and `browser_restart`, which only switched between the pane and Chrome. Pass `headless: false` for a window.
+- Config key `smartTerminal` and `DEVTOOLS_FLEET_SMART_TERMINAL`. A config file that still sets `smartTerminal` is ignored for that key.
+- The integration suite's Smart Terminal mode.
+
+Registry entries left by a pane (no Chrome pid) are cleaned up as dead browsers; nothing is signalled.
+
 ## [0.3.1] - 2026-11-09
 
 ### Fixed

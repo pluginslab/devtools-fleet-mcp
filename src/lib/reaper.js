@@ -5,7 +5,6 @@ import { fileURLToPath } from 'node:url';
 import { PATHS } from './config.js';
 import { listEntries, removeEntry, classify, readEntry } from './registry.js';
 import { closeChrome } from './chrome.js';
-import { browserProcessAlive } from './smart-terminal.js';
 import { withLock } from './lock.js';
 import { ensurePrivateDir, isPidAlive, sleep } from './fs-utils.js';
 
@@ -19,7 +18,7 @@ const STRAY_PROFILE_MS = 60 * 60_000;
 
 /** Close a deregistered browser and delete its profile. */
 export async function closeEntryBrowser(entry) {
-  if (browserProcessAlive(entry)) await closeChrome(entry).catch(() => {});
+  if (entry.chromePid && isPidAlive(entry.chromePid)) await closeChrome(entry).catch(() => {});
   if (entry.profileDir) rmSync(entry.profileDir, { recursive: true, force: true });
 }
 
@@ -28,7 +27,7 @@ export function pruneRegistry() {
   for (const entry of listEntries()) {
     const status = classify(entry);
     if (status === 'starting') continue;
-    if (!browserProcessAlive(entry)) {
+    if (!entry.chromePid || !isPidAlive(entry.chromePid)) {
       removeEntry(entry.id);
       if (entry.profileDir) rmSync(entry.profileDir, { recursive: true, force: true });
     }
@@ -45,7 +44,7 @@ export async function reapOnce({ orphanTimeoutMinutes, now = Date.now(), closeDe
   const reasonFor = (entry) => {
     const status = classify(entry);
     if (status === 'starting' || status === 'active') return null;
-    if (!browserProcessAlive(entry)) return 'chrome already exited';
+    if (!entry.chromePid || !isPidAlive(entry.chromePid)) return 'chrome already exited';
     if (!entry.port) return 'launch never finished';
     if (status === 'orphan') return 'owning session ended';
     if (closeDetached) return 'detached (forced)';

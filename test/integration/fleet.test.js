@@ -1,7 +1,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
-import { makeHome, cleanupHome, registry, FleetClient, runCli, startFixtures, waitFor, pageId, evalValue, sleep, assertBackend, crashBrowser, browserGone, gateBrowsers, VIA_SMART_TERMINAL } from '../helpers/fleet.js';
+import { makeHome, cleanupHome, registry, FleetClient, runCli, startFixtures, waitFor, pageId, evalValue, sleep } from '../helpers/fleet.js';
 
 // Acceptance tests 1-4 from SCOPE.md: isolation, the cap, re-adoption, reaping.
 // Plus crash recovery and relaunch.
@@ -22,7 +22,6 @@ test('1+2. ten sessions in parallel each get their own browser; the eleventh hit
   const clients = await Promise.all(Array.from({ length: 10 }, () => FleetClient.start({ home })));
   try {
     const opened = await Promise.all(clients.map((c, i) => c.call('new_page', { url: `${fx.appOrigin}/page-${i}` })));
-    registry(home).forEach((e) => assertBackend(e));
     opened.forEach((r, i) => assert.ok(!r.isError && r.text.includes(`/page-${i}`), `client ${i}: ${r.text}`));
 
     const lists = await Promise.all(clients.map((c) => c.call('list_pages')));
@@ -104,16 +103,16 @@ test('4. the reaper closes orphans at once and detached browsers after the timeo
   assert.match(r.stdout + reaperLog, new RegExp(`${orphanEntry.id}\\s+owning session ended`));
   assert.match(r.stdout, new RegExp(`${idleEntry.id}\\s+detached for over 1 min`));
   assert.equal(registry(home).length, 0);
-  await waitFor(async () => (await browserGone(orphanEntry)) && (await browserGone(idleEntry)), { what: 'browsers to close' });
+  const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  await waitFor(() => !alive(orphanEntry.chromePid) && !alive(idleEntry.chromePid), { what: 'chromes to exit' });
 });
 
 test('recovery: a crashed Chrome is replaced; a crashed chrome-devtools-mcp is restarted', async () => {
   const c = await FleetClient.start({ home });
   await c.call('new_page', { url: `${fx.appOrigin}/before-crash` });
   const [entry] = registry(home);
-  assertBackend(entry);
 
-  await crashBrowser(entry);
+  process.kill(entry.chromePid, 'SIGKILL');
   await sleep(500);
   const afterChrome = await c.call('new_page', { url: `${fx.appOrigin}/after-crash` });
   assert.equal(afterChrome.isError, false, afterChrome.text);
@@ -157,56 +156,6 @@ test('browser_restart keeps session cookies, localStorage and tabs', async () =>
   await c.close();
 });
 
-test('chrome: true gets a real Chrome in a Smart Terminal tab; browser_restart moves between Chrome and the pane, logins kept', { skip: !VIA_SMART_TERMINAL && 'needs a running Smart Terminal (SMART_TERMINAL_GATE)' }, async () => {
-  const c = await FleetClient.start({ home });
-  const started = await c.call('browser_start', { chrome: true, headless: true, url: `${fx.appOrigin}/login` });
-  assert.equal(started.isError, false, started.text);
-  let [entry] = registry(home);
-  assertBackend(entry, { strict: true }); // a Chrome, as a strict state gets
-  assert.equal(entry.chrome, true);
-  let pages = await c.call('list_pages');
-  const loginPage = pageId(pages.text, '/login');
-  await c.call('evaluate_script', { pageId: loginPage, function: '() => { document.getElementById("u").value = "admin"; document.getElementById("p").value = "pw"; document.forms[0].submit(); return true }' });
-  await sleep(800);
-  await c.call('navigate_page', { pageId: loginPage, url: `${fx.appOrigin}/app` });
-
-  const toPane = await c.call('browser_restart', { chrome: false });
-  assert.equal(toPane.isError, false, toPane.text);
-  assert.match(toPane.text, /Smart Terminal pane/);
-  [entry] = registry(home);
-  assertBackend(entry);
-  assert.equal((await gateBrowsers(entry)).length, 1);
-  pages = await c.call('list_pages');
-  let appPage = pageId(pages.text, '/app');
-  assert.equal(evalValue((await c.call('evaluate_script', { pageId: appPage, function: '() => document.title' })).text), 'user=admin ls=from-login');
-
-  const toChrome = await c.call('browser_restart', { chrome: true, headless: true });
-  assert.equal(toChrome.isError, false, toChrome.text);
-  const paneEntry = entry;
-  [entry] = registry(home);
-  assertBackend(entry, { strict: true });
-  assert.ok(entry.profileDir, 'Chrome got a profile dir again');
-  assert.equal((await gateBrowsers(paneEntry)).length, 0, 'the pane was closed');
-  pages = await c.call('list_pages');
-  appPage = pageId(pages.text, '/app');
-  assert.equal(evalValue((await c.call('evaluate_script', { pageId: appPage, function: '() => document.title' })).text), 'user=admin ls=from-login');
-
-  const again = await c.call('browser_start', { chrome: false });
-  assert.match(again.text, /browser_restart\(\{ chrome: false \}\)/);
-  await c.call('browser_stop');
-  await c.close();
-});
-
-test('browser_restart({ chrome: false }) outside Smart Terminal says there is no pane', { skip: VIA_SMART_TERMINAL && 'there is a pane' }, async () => {
-  const c = await FleetClient.start({ home });
-  await c.call('browser_start');
-  const r = await c.call('browser_restart', { chrome: false });
-  assert.equal(r.isError, true);
-  assert.match(r.text, /no pane to move to/);
-  await c.call('browser_stop');
-  await c.close();
-});
-
 test('explicit options on a running browser are refused with a clear message', async () => {
   const c = await FleetClient.start({ home });
   await c.call('browser_start');
@@ -219,7 +168,7 @@ test('explicit options on a running browser are refused with a clear message', a
   await c.close();
 });
 
-test('a launch that hangs times out cleanly: error to the agent, nothing left running or registered', { skip: VIA_SMART_TERMINAL && 'fakes a hanging Chrome binary; a pane launches no Chrome' }, async () => {
+test('a launch that hangs times out cleanly: error to the agent, nothing left running or registered', async () => {
   const { writeFileSync, chmodSync, existsSync } = await import('node:fs');
   const { join } = await import('node:path');
   const fake = join(home, 'fake-chrome.sh');
@@ -250,15 +199,10 @@ test('parallel tool calls during browser_restart: no crash, no leaked browser', 
   assert.equal(results[0].isError, false, results[0].text);
   const entries = registry(home);
   assert.equal(entries.length, 1, 'exactly one browser registered');
-  assertBackend(entries[0]);
-  if (entries[0].smartTerminal) {
-    assert.equal((await gateBrowsers(entries[0])).length, 1, 'exactly one pane for that browser');
-  } else {
-    const { execFileSync } = await import('node:child_process');
-    const mains = execFileSync('ps', ['-ax', '-o', 'args='], { encoding: 'utf8' }).split('\n')
-      .filter((l) => l.includes(`--user-data-dir=${entries[0].profileDir}`) && !l.includes('--type='));
-    assert.equal(mains.length, 1, 'exactly one Chrome on that profile');
-  }
+  const { execFileSync } = await import('node:child_process');
+  const mains = execFileSync('ps', ['-ax', '-o', 'args='], { encoding: 'utf8' }).split('\n')
+    .filter((l) => l.includes(`--user-data-dir=${entries[0].profileDir}`) && !l.includes('--type='));
+  assert.equal(mains.length, 1, 'exactly one Chrome on that profile');
   const after = await c.call('list_pages');
   assert.match(after.text, /\/parallel/);
   await c.call('browser_stop');

@@ -30,9 +30,6 @@ export const DEFAULTS = {
   upstreamArgs: [],
   // Extra flags for Chrome itself.
   chromeArgs: [],
-  // In a Smart Terminal tab, use the tab's browser pane. false: always Chrome
-  // (an agent can still ask per call with browser_start({ chrome: true })).
-  smartTerminal: true,
 };
 
 // Flags fleet owns. Passing them through would hand browser lifecycle back to
@@ -51,7 +48,6 @@ const ENV = {
   maxBrowsers: ['DEVTOOLS_FLEET_MAX_BROWSERS', parsePositiveInt],
   orphanTimeoutMinutes: ['DEVTOOLS_FLEET_ORPHAN_TIMEOUT_MINUTES', parsePositiveInt],
   launchTimeoutSeconds: ['DEVTOOLS_FLEET_LAUNCH_TIMEOUT_SECONDS', parsePositiveInt],
-  smartTerminal: ['DEVTOOLS_FLEET_SMART_TERMINAL', parseBool],
 };
 
 export function loadConfig() {
@@ -77,7 +73,6 @@ export function validateConfig(config) {
   for (const key of ['maxBrowsers', 'orphanTimeoutMinutes', 'launchTimeoutSeconds']) {
     if (!Number.isInteger(config[key]) || config[key] < 1) throw new Error(`${key} must be a positive integer`);
   }
-  if (typeof config.smartTerminal !== 'boolean') throw new Error('smartTerminal must be true or false');
   for (const key of ['upstreamArgs', 'chromeArgs']) {
     if (!Array.isArray(config[key]) || !config[key].every((a) => typeof a === 'string')) {
       throw new Error(`${key} must be an array of strings`);

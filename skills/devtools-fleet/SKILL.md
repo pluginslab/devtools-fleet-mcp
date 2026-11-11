@@ -29,12 +29,11 @@ A browser started from a state only reaches that state's origins. When something
 
 ## Mobile layout
 
-Pages render their desktop layout (1366 px wide). To see the phone version, call `emulate({ viewport: "390x844x3,mobile,touch" })`, and add `userAgent` with an iPhone Safari user agent if the site serves mobile by user agent (then reload). Call `emulate` again without `viewport` to go back to the desktop layout. In a Smart Terminal pane the pane switches with you and shows a phone icon; the person can also switch it there.
+Pages render their desktop layout (1366 px wide). To see the phone version, call `emulate({ viewport: "390x844x3,mobile,touch" })`, and add `userAgent` with an iPhone Safari user agent if the site serves mobile by user agent (then reload). Call `emulate` again without `viewport` to go back to the desktop layout.
 
 ## Showing the person something
 
 - `browser_restart({ headless: false })` relaunches with a visible window (same cookies and tabs, pages reload). Use it when the person needs to watch, solve a captcha or pass 2FA. `browser_restart({ headless: true })` hides it again.
-- In a Smart Terminal tab the browser is the tab's pane. When the person asks for a real Chrome ("open it in Chrome", "not in Smart Terminal"), or a site refuses embedded browsers (Google sign-in says "this browser may not be secure"), use `browser_start({ chrome: true })`, or `browser_restart({ chrome: true })` if one is already running: a Chrome window opens with the same cookies and tabs. `browser_restart({ chrome: false })` moves it back to the pane. Don't send the person to `devtools-fleet login` for this; that's for saving a login other sessions can reuse.
 - The person can also watch without interrupting you: `devtools-fleet ls`, then `devtools-fleet show <id>`. `browser_status` tells you your id.
 
 ## Saving a login

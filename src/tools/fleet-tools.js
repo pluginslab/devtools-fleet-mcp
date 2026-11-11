@@ -13,8 +13,7 @@ export const FLEET_TOOLS = [
       'Start this session\'s own Chrome (isolated from every other agent). Optional: the first browser tool call starts one with defaults anyway. ' +
       'Call it explicitly to load a saved login (`state`), to pick headless/viewport/channel, or to open a URL. ' +
       'A browser started from a state can only visit that state\'s allowed origins. ' +
-      'If this session already had a browser before a reconnect, it is picked up again with its tabs. ' +
-      'In a Smart Terminal tab the browser is the tab\'s pane; pass chrome: true when the person asks for a real Chrome, or the site refuses embedded browsers (Google sign-in).',
+      'If this session already had a browser before a reconnect, it is picked up again with its tabs.',
     schema: z.object({
       state: z.string().optional().describe('Name of a saved login state (see state_list)'),
       headless: z.boolean().optional().describe('Run without a window (default from config, normally true)'),
@@ -22,7 +21,6 @@ export const FLEET_TOOLS = [
       channel: z.enum(['stable', 'beta', 'dev', 'canary']).optional(),
       url: z.string().url().optional().describe('Open this URL in the first tab'),
       allowedOrigins: z.array(z.string()).optional().describe('Without a state: restrict this browser to these origins, e.g. ["http://localhost:3000"]'),
-      chrome: z.boolean().optional().describe('Launch a real Chrome window even in a Smart Terminal tab (visible unless headless: true)'),
     }).strict(),
     async handler(session, args) {
       const { adopted, alreadyRunning } = await session.start(args);
@@ -44,17 +42,11 @@ export const FLEET_TOOLS = [
     name: 'browser_restart',
     description:
       'Relaunch this session\'s browser keeping cookies, localStorage and open tabs. Pass headless: false to get a visible window ' +
-      '(e.g. so the human can watch or solve a captcha), headless: true to hide it again. ' +
-      'In a Smart Terminal tab, chrome: true moves the browser out of the pane into a real Chrome window, chrome: false moves it back. Pages reload.',
-    schema: z.object({
-      headless: z.boolean().optional(),
-      chrome: z.boolean().optional().describe('true: a real Chrome window; false: the Smart Terminal pane'),
-    }).strict(),
+      '(e.g. so the human can watch or solve a captcha), headless: true to hide it again. Pages reload.',
+    schema: z.object({ headless: z.boolean().optional() }).strict(),
     async handler(session, args) {
       const { headless, reopenedTabs } = await session.restart(args);
-      const status = await session.status();
-      const where = status.smartTerminalTab ? 'in the Smart Terminal pane' : headless ? 'headless' : 'in a Chrome window';
-      return text(`Restarted ${where}; reopened ${reopenedTabs} tab(s). Page ids have changed: call list_pages.`);
+      return text(`Restarted ${headless ? 'headless' : 'with a visible window'}; reopened ${reopenedTabs} tab(s). Page ids have changed: call list_pages.`);
     },
   },
   {
@@ -111,7 +103,7 @@ export function findFleetTool(name) {
 
 function describe(s) {
   const lines = [
-    `browser ${s.id}${s.state ? `, state "${s.state}"` : ''}, ${s.smartTerminalTab ? 'Smart Terminal pane (browser_restart({ chrome: true }) for a real Chrome)' : `${s.headless ? 'headless Chrome' : 'Chrome window'}${s.smartTerminalAvailable ? ' (browser_restart({ chrome: false }) for the Smart Terminal pane)' : ''}`}${s.viewport ? `, ${s.viewport}` : ''}, ${s.channel}`,
+    `browser ${s.id}${s.state ? `, state "${s.state}"` : ''}, ${s.headless ? 'headless' : 'visible window'}${s.viewport ? `, ${s.viewport}` : ''}, ${s.channel}`,
     s.allowedOrigins ? `allowed origins: ${s.allowedOrigins.join(', ')}${s.strict ? ' (strict)' : ''}` : 'allowed origins: any',
     `tabs: ${s.tabs.length ? s.tabs.join(' | ') : 'none with a web page'}`,
     `uptime ${s.uptimeSeconds}s${s.blockedRequests ? `, ${s.blockedRequests} request(s) blocked so far` : ''}`,
